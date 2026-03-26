@@ -21,9 +21,9 @@ execute:
 knitr::opts_chunk$set(
   fig.width = 6.9,
   fig.height = 4.5,
-  dpi = 300,
-  dev = "cairo_pdf",
-  dev.args = list(family = "Arial")
+  dpi = 150,
+  dev = "png",
+  dev.args = list(type = "cairo")
 )
 
 # ── Package loading ──────────────────────────────────────────────────────────
@@ -46,7 +46,10 @@ suppressPackageStartupMessages({
   library(viridis)
   library(ggrepel)
   library(gamlss)
+  library(reticulate)
 })
+
+reticulate::use_python("/Users/pepin/.pyenv/versions/3.12.12/bin/python3", required = TRUE)
 
 # ── JACC color palette (colorblind-safe) ─────────────────────────────────────
 jacc_cols <- c(
@@ -336,167 +339,212 @@ p_flow
 save_jacc(p_flow, "../2_Output/Cohort_Filtering_Workflow.pdf", w = 6.9, h = 3.8)
 ```
 
-# ASE 2025 Diastolic Dysfunction Grading
+# ASE 2025 Filling Pressure Classification (HCM-Specific Algorithm)
 
-The 2025 ASE guidelines (Nagueh et al., *JASE* 2025) employ a two-step hierarchical algorithm for grading diastolic dysfunction. **Step 1** identifies impaired myocardial relaxation using mitral annular e$'$ velocity: average e$'$ $\leq$ 6.5 cm/s, septal e$'$ $\leq$ 6 cm/s, or lateral e$'$ $\leq$ 7 cm/s. **Step 2** evaluates markers of elevated left ventricular filling pressures (LVFP): average E/e$'$ >14, left atrial volume index (LAVI) >34 mL/m$^2$, peak tricuspid regurgitation velocity (TR V$_{max}$) >2.8 m/s, and E/A ratio $\leq$ 0.8 or $\geq$ 2. Left atrial reservoir strain (LARS $\leq$ 18%) and pulmonary venous Ar-A duration difference ($\geq$ 30 ms) were not available in this dataset; grading proceeds with 4 of 5 filling pressure criteria (excluding LARS).
+The 2025 ASE guidelines (Nagueh et al., *JASE* 2025) provide a disease-specific algorithm for patients with known myocardial disease, including HCM. In contrast to the general-population algorithm that proceeds through a two-step hierarchy (Step 1: impaired relaxation screening → Step 2: filling pressure grading into Grades I–III), the HCM-specific pathway **presumes impaired myocardial relaxation** given the underlying myopathy, hypertrophy, and fiber disarray, and proceeds directly to filling pressure estimation. The resulting classification is **binary**: Normal vs. Elevated LV filling pressures.
+
+Three primary criteria are evaluated for concordance: average E/e$'$ >14, left atrial volume index (LAVI) >34 mL/m$^2$, and peak tricuspid regurgitation velocity (TR V$_{max}$) >2.8 m/s. When all three are concordantly normal or abnormal, classification is straightforward. When discordant, tiebreaker criteria are applied: left atrial reservoir strain (LARS $\leq$ 18%), pulmonary venous Ar-A duration difference ($\geq$ 30 ms), and E/A ratio ($\leq$ 0.8 with E velocity $\leq$ 50 cm/s [normal] or $\geq$ 2 [elevated]). LARS and Ar-A duration were not available in this dataset; the E/A ratio serves as the primary tiebreaker.
 
 ```{r ase_grading, results='asis'}
-grade_ase2025 <- function(e_prime_ave, med_peak_e_vel, lat_peak_e_vel,
-                           e_e_ave, la_vol_index, tr_max_vel, mv_e_a,
-                           mv_dec_time) {
+# ── ASE 2025 HCM-Specific Filling Pressure Algorithm ──────────────────────────
+# In HCM, impaired relaxation is PRESUMED → skip Step 1 → classify directly by
+# filling pressure markers into: Normal vs Elevated
+classify_filling_pressure <- function(e_e_ave, la_vol_index, tr_max_vel,
+                                       mv_e_a, E_vel) {
 
-  # ── Step 1: Impaired Relaxation ──────────────────────────────────────────────
-  # Any one criterion sufficient: avg e' <= 6.5, septal e' <= 6, lateral e' <= 7
-  impaired_relax_ave <- !is.na(e_prime_ave)    & e_prime_ave <= 6.5
-  impaired_relax_sep <- !is.na(med_peak_e_vel) & med_peak_e_vel <= 6
-  impaired_relax_lat <- !is.na(lat_peak_e_vel) & lat_peak_e_vel <= 7
-
-  step1_available <- (!is.na(e_prime_ave)) | (!is.na(med_peak_e_vel)) | (!is.na(lat_peak_e_vel))
-  step1_positive  <- impaired_relax_ave | impaired_relax_sep | impaired_relax_lat
-
-  # ── Step 2: Elevated Filling Pressures ───────────────────────────────────────
-  # 5 criteria total; LARS unavailable, so max available = 4
+  # ── Three primary concordance criteria ─────────────────────────────────────
   # Note: tr_max_vel is stored in cm/s; ASE cutoff is >2.8 m/s = >280 cm/s
   abn_ee   <- !is.na(e_e_ave)      & e_e_ave > 14
   abn_lavi <- !is.na(la_vol_index)  & la_vol_index > 34
   abn_trv  <- !is.na(tr_max_vel)    & tr_max_vel > 280
-  abn_ea   <- !is.na(mv_e_a)       & (mv_e_a <= 0.8 | mv_e_a >= 2)
 
-  n_fp_available <- (!is.na(e_e_ave)) + (!is.na(la_vol_index)) +
-                    (!is.na(tr_max_vel)) + (!is.na(mv_e_a))
-  n_fp_abnormal  <- abn_ee + abn_lavi + abn_trv + abn_ea
+  avail_ee   <- !is.na(e_e_ave)
+  avail_lavi <- !is.na(la_vol_index)
+  avail_trv  <- !is.na(tr_max_vel)
 
-  # ── Grade III: Restrictive physiology ────────────────────────────────────────
-  # E/A >= 2 AND (deceleration time < 150 ms OR E/e' > 14)
-  restrictive <- !is.na(mv_e_a) & mv_e_a >= 2 &
-                 ((!is.na(mv_dec_time) & mv_dec_time < 150) | abn_ee)
+  n_primary_available <- avail_ee + avail_lavi + avail_trv
+  n_primary_abnormal  <- abn_ee + abn_lavi + abn_trv
 
-  # ── Grading ─────────────────────────────────────────────────────────────────
-  grade <- case_when(
-    !step1_available                            ~ "Indeterminate",
-    !step1_positive                             ~ "Normal",
-    step1_positive & n_fp_available < 2         ~ "Indeterminate",
-    step1_positive & restrictive                ~ "Grade III",
-    step1_positive & n_fp_abnormal >= 2         ~ "Grade II",
-    step1_positive & n_fp_abnormal <= 1         ~ "Grade I",
-    TRUE                                         ~ "Indeterminate"
+  # ── Concordance logic ──────────────────────────────────────────────────────
+  # All 3 concordantly normal → Normal FP
+
+  # All 3 concordantly abnormal → Elevated FP
+  # Discordant → apply tiebreakers
+  concordant_normal   <- (n_primary_available >= 2) & (n_primary_abnormal == 0)
+  concordant_elevated <- (n_primary_available >= 2) & (n_primary_abnormal == n_primary_available)
+
+  # ── Tiebreaker: E/A ratio (LARS and Ar-A unavailable) ─────────────────────
+  # E/A ≤ 0.8 AND E ≤ 50 cm/s → favors normal LAP (normal FP)
+  # E/A ≥ 2 → favors elevated FP
+  ea_favors_normal   <- !is.na(mv_e_a) & !is.na(E_vel) &
+                         mv_e_a <= 0.8 & E_vel <= 50
+  ea_favors_elevated <- !is.na(mv_e_a) & mv_e_a >= 2
+
+  # ── Classification ─────────────────────────────────────────────────────────
+  fp_class <- case_when(
+    n_primary_available < 2                               ~ "Indeterminate",
+    concordant_normal                                     ~ "Normal",
+    concordant_elevated                                   ~ "Elevated",
+    # Discordant: majority rule with tiebreaker
+    n_primary_abnormal >= 2                               ~ "Elevated",
+    n_primary_abnormal == 0                               ~ "Normal",
+    # 1 of 3 abnormal (or 1 of 2 abnormal) → use tiebreaker
+    n_primary_abnormal == 1 & ea_favors_elevated          ~ "Elevated",
+    n_primary_abnormal == 1 & ea_favors_normal            ~ "Normal",
+    # Tiebreaker unavailable or equivocal
+    TRUE                                                  ~ "Indeterminate"
   )
 
-  factor(grade, levels = c("Normal", "Grade I", "Grade II", "Grade III", "Indeterminate"),
+  factor(fp_class, levels = c("Normal", "Elevated", "Indeterminate"),
          ordered = FALSE)
 }
 
 baseline_df <- baseline_df %>%
-  mutate(dd_grade = grade_ase2025(
-    e_prime_ave, med_peak_e_vel, lat_peak_e_vel,
-    e_e_ave, la_vol_index, tr_max_vel, mv_e_a, mv_dec_time
+  mutate(fp_class = classify_filling_pressure(
+    e_e_ave, la_vol_index, tr_max_vel, mv_e_a, E_vel
   ))
 
 long_df <- long_df %>%
   left_join(
-    baseline_df %>% select(ID, dd_grade),
+    baseline_df %>% select(ID, fp_class),
     by = "ID"
   )
 
-# Step 1 summary: impaired relaxation
+# ── Concordance summary ──────────────────────────────────────────────────────
 baseline_df <- baseline_df %>%
   mutate(
-    step1_available = (!is.na(e_prime_ave)) | (!is.na(med_peak_e_vel)) | (!is.na(lat_peak_e_vel)),
-    step1_positive  = (!is.na(e_prime_ave) & e_prime_ave <= 6.5) |
-                      (!is.na(med_peak_e_vel) & med_peak_e_vel <= 6) |
-                      (!is.na(lat_peak_e_vel) & lat_peak_e_vel <= 7)
+    abn_ee   = !is.na(e_e_ave)      & e_e_ave > 14,
+    abn_lavi = !is.na(la_vol_index)  & la_vol_index > 34,
+    abn_trv  = !is.na(tr_max_vel)    & tr_max_vel > 280,
+    n_primary_available = (!is.na(e_e_ave)) + (!is.na(la_vol_index)) + (!is.na(tr_max_vel)),
+    n_primary_abnormal  = abn_ee + abn_lavi + abn_trv,
+    concordant = (n_primary_abnormal == 0) | (n_primary_abnormal == n_primary_available),
+    discordant = n_primary_available >= 2 & !concordant
   )
 
-cat("**Step 1 — Impaired Relaxation:**\n\n")
-cat(sprintf("  e' data available: %d / %d patients\n",
-            sum(baseline_df$step1_available), nrow(baseline_df)))
-cat(sprintf("  Impaired relaxation: %d (%0.1f%%)\n",
-            sum(baseline_df$step1_positive, na.rm = TRUE),
-            100 * mean(baseline_df$step1_positive, na.rm = TRUE)))
-cat(sprintf("  Normal relaxation:   %d (%0.1f%%)\n\n",
-            sum(baseline_df$step1_available & !baseline_df$step1_positive, na.rm = TRUE),
-            100 * mean(baseline_df$step1_available & !baseline_df$step1_positive, na.rm = TRUE)))
+cat("**ASE 2025 HCM-Specific Filling Pressure Classification:**\n\n")
+cat("  In HCM, impaired myocardial relaxation is PRESUMED.\n")
+cat("  Classification proceeds directly to filling pressure estimation.\n\n")
 
-cat("**ASE 2025 DD Grade Distribution (Baseline):**\n\n")
-table(baseline_df$dd_grade, useNA = "ifany")
+cat("**Primary Criteria Concordance:**\n\n")
+cat(sprintf("  Concordant cases:  %d (%0.1f%%)\n",
+            sum(baseline_df$concordant & baseline_df$n_primary_available >= 2, na.rm = TRUE),
+            100 * mean(baseline_df$concordant[baseline_df$n_primary_available >= 2], na.rm = TRUE)))
+cat(sprintf("  Discordant cases:  %d (%0.1f%%)\n\n",
+            sum(baseline_df$discordant, na.rm = TRUE),
+            100 * mean(baseline_df$discordant[baseline_df$n_primary_available >= 2], na.rm = TRUE)))
+
+cat("**Filling Pressure Classification (Baseline):**\n\n")
+print(table(baseline_df$fp_class, useNA = "ifany"))
+
+cat(sprintf("\n\n  Normal:        %d (%0.1f%%)\n",
+            sum(baseline_df$fp_class == "Normal", na.rm = TRUE),
+            100 * mean(baseline_df$fp_class == "Normal", na.rm = TRUE)))
+cat(sprintf("  Elevated:      %d (%0.1f%%)\n",
+            sum(baseline_df$fp_class == "Elevated", na.rm = TRUE),
+            100 * mean(baseline_df$fp_class == "Elevated", na.rm = TRUE)))
+cat(sprintf("  Indeterminate: %d (%0.1f%%)\n",
+            sum(baseline_df$fp_class == "Indeterminate", na.rm = TRUE),
+            100 * mean(baseline_df$fp_class == "Indeterminate", na.rm = TRUE)))
+
+# Individual criterion prevalence
+cat("\n**Individual Criterion Prevalence:**\n\n")
+cat(sprintf("  E/e' >14:     %d / %d (%0.1f%%)\n",
+            sum(baseline_df$abn_ee, na.rm = TRUE),
+            sum(!is.na(baseline_df$e_e_ave)),
+            100 * mean(baseline_df$abn_ee[!is.na(baseline_df$e_e_ave)], na.rm = TRUE)))
+cat(sprintf("  LAVI >34:     %d / %d (%0.1f%%)\n",
+            sum(baseline_df$abn_lavi, na.rm = TRUE),
+            sum(!is.na(baseline_df$la_vol_index)),
+            100 * mean(baseline_df$abn_lavi[!is.na(baseline_df$la_vol_index)], na.rm = TRUE)))
+cat(sprintf("  TR Vmax >2.8: %d / %d (%0.1f%%)\n",
+            sum(baseline_df$abn_trv, na.rm = TRUE),
+            sum(!is.na(baseline_df$tr_max_vel)),
+            100 * mean(baseline_df$abn_trv[!is.na(baseline_df$tr_max_vel)], na.rm = TRUE)))
 ```
 
-```{r ase_figure, fig.width=6.9, fig.height=6.5, results='asis'}
-# Panel A: Step 1 — Impaired relaxation
-step1_summary <- baseline_df %>%
-  filter(step1_available) %>%
-  mutate(Step1 = ifelse(step1_positive, "Impaired Relaxation", "Normal Relaxation")) %>%
-  count(Step1)
+```{r ase_figure, fig.width=6.9, fig.height=5.0, results='asis'}
+# ── Panel A: Filling pressure classification distribution ─────────────────────
+df_fp <- baseline_df %>% filter(fp_class != "Indeterminate")
 
-p_step1 <- ggplot(step1_summary, aes(x = Step1, y = n, fill = Step1)) +
+p_bar <- df_fp %>%
+  count(fp_class) %>%
+  ggplot(aes(x = fp_class, y = n, fill = fp_class)) +
   geom_col(width = 0.6, color = "black", linewidth = 0.2) +
-  geom_text(aes(label = n), vjust = -0.4, size = 3) +
-  scale_fill_manual(values = c("Normal Relaxation" = jacc_cols["blue"],
-                                "Impaired Relaxation" = jacc_cols["orange"])) +
-  labs(title = "Step 1: Myocardial Relaxation",
-       x = bquote("e'" ~ "Velocity Assessment"), y = "Patients") +
-  theme_jacc() + theme(legend.position = "none")
-
-# Panel B: DD grade distribution
-df_grade <- baseline_df %>% filter(dd_grade != "Indeterminate")
-
-p_bar <- df_grade %>%
-  count(dd_grade) %>%
-  ggplot(aes(x = dd_grade, y = n, fill = dd_grade)) +
-  geom_col(width = 0.7, color = "black", linewidth = 0.2) +
-  geom_text(aes(label = n), vjust = -0.4, size = 3) +
+  geom_text(aes(label = n), vjust = -0.4, size = 3.5) +
   scale_fill_manual(values = c("Normal" = jacc_cols["blue"],
-                                "Grade I" = jacc_cols["green"],
-                                "Grade II" = jacc_cols["orange"],
-                                "Grade III" = jacc_cols["red"])) +
-  labs(title = "Step 2: DD Grade", x = "ASE 2025 Grade", y = "Patients") +
+                                "Elevated" = jacc_cols["red"])) +
+  labs(title = "LV Filling Pressure Classification",
+       x = "ASE 2025 (HCM-Specific)", y = "Patients") +
   theme_jacc() + theme(legend.position = "none")
 
-# Panel B: Peak VO2 by DD grade
-p_box <- df_grade %>%
+# ── Panel B: Individual criterion concordance heatmap ────────────────────────
+df_criteria <- baseline_df %>%
+  filter(fp_class != "Indeterminate") %>%
+  select(fp_class, `E/e' >14` = abn_ee, `LAVI >34` = abn_lavi, `TR Vmax >2.8` = abn_trv) %>%
+  pivot_longer(-fp_class, names_to = "Criterion", values_to = "Abnormal") %>%
+  group_by(fp_class, Criterion) %>%
+  summarise(pct = 100 * mean(Abnormal, na.rm = TRUE), .groups = "drop")
+
+p_criteria <- ggplot(df_criteria, aes(x = Criterion, y = fp_class, fill = pct)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.0f%%", pct)), size = 3.5, fontface = "bold") +
+  scale_fill_gradient(low = "white", high = jacc_cols["red"],
+                      limits = c(0, 100), name = "% Abnormal") +
+  labs(title = "Criterion Prevalence by FP Group",
+       x = NULL, y = NULL) +
+  theme_jacc() + theme(legend.position = "right",
+                        axis.text.x = element_text(angle = 25, hjust = 1))
+
+# ── Panel C: Peak VO2 by filling pressure ─────────────────────────────────────
+p_box <- df_fp %>%
   filter(!is.na(VO2_FRIEND2_PP)) %>%
-  ggplot(aes(x = dd_grade, y = VO2_FRIEND2_PP, fill = dd_grade)) +
-  geom_boxplot(width = 0.6, outlier.size = 0.8, linewidth = 0.3) +
+  ggplot(aes(x = fp_class, y = VO2_FRIEND2_PP, fill = fp_class)) +
+  geom_boxplot(width = 0.5, outlier.size = 0.8, linewidth = 0.3) +
+  geom_jitter(width = 0.15, alpha = 0.15, size = 0.8) +
   scale_fill_manual(values = c("Normal" = jacc_cols["blue"],
-                                "Grade I" = jacc_cols["green"],
-                                "Grade II" = jacc_cols["orange"],
-                                "Grade III" = jacc_cols["red"])) +
-  labs(title = bquote(bold("Peak" ~ VO[2] ~ "by DD Grade")),
-       x = "ASE 2025 Grade",
+                                "Elevated" = jacc_cols["red"])) +
+  annotate("text", x = 1.5, y = Inf, vjust = 1.5, size = 3, fontface = "italic",
+           label = paste0("p = ", format.pval(
+             wilcox.test(VO2_FRIEND2_PP ~ fp_class, data = df_fp)$p.value, digits = 2))) +
+  labs(title = bquote(bold("Peak" ~ VO[2] ~ "by Filling Pressure")),
+       x = "LV Filling Pressure",
        y = bquote("Peak" ~ VO[2] ~ "(% Predicted, FRIEND 2.0)")) +
   theme_jacc() + theme(legend.position = "none")
 
-# Panel C: VE/VCO2 by DD grade
-p_vevco2_grade <- df_grade %>%
+# ── Panel D: VE/VCO2 by filling pressure ─────────────────────────────────────
+p_vevco2 <- df_fp %>%
   filter(!is.na(VeVco2_slope)) %>%
-  ggplot(aes(x = dd_grade, y = VeVco2_slope, fill = dd_grade)) +
-  geom_boxplot(width = 0.6, outlier.size = 0.8, linewidth = 0.3) +
+  ggplot(aes(x = fp_class, y = VeVco2_slope, fill = fp_class)) +
+  geom_boxplot(width = 0.5, outlier.size = 0.8, linewidth = 0.3) +
+  geom_jitter(width = 0.15, alpha = 0.15, size = 0.8) +
   scale_fill_manual(values = c("Normal" = jacc_cols["blue"],
-                                "Grade I" = jacc_cols["green"],
-                                "Grade II" = jacc_cols["orange"],
-                                "Grade III" = jacc_cols["red"])) +
-  labs(title = bquote(bold(VE/VCO[2] ~ "Slope by DD Grade")),
-       x = "ASE 2025 Grade",
+                                "Elevated" = jacc_cols["red"])) +
+  annotate("text", x = 1.5, y = Inf, vjust = 1.5, size = 3, fontface = "italic",
+           label = paste0("p = ", format.pval(
+             wilcox.test(VeVco2_slope ~ fp_class, data = df_fp)$p.value, digits = 2))) +
+  labs(title = bquote(bold(VE/VCO[2] ~ "Slope by Filling Pressure")),
+       x = "LV Filling Pressure",
        y = bquote(VE/VCO[2] ~ "Slope")) +
   theme_jacc() + theme(legend.position = "none")
 
-fig_ase <- (p_step1 | p_bar) / (p_box | p_vevco2_grade) +
+fig_ase <- (p_bar | p_criteria) / (p_box | p_vevco2) +
   plot_annotation(tag_levels = "A") &
   theme(plot.tag = element_text(face = "bold", size = 11))
 
 fig_ase
-save_jacc(fig_ase, "../2_Output/Figure_ASE2025_DDGrade.pdf", w = 6.9, h = 4.0)
+save_jacc(fig_ase, "../2_Output/Figure_ASE2025_FillingPressure.pdf", w = 6.9, h = 5.0)
 ```
 
 ```{r ase_stratified_table, results='asis'}
 tbl_ase <- baseline_df %>%
-  filter(dd_grade != "Indeterminate") %>%
-  select(dd_grade, age, Sex, BMI, LBMI, HCM_Phenotype,
+  filter(fp_class != "Indeterminate") %>%
+  select(fp_class, age, Sex, BMI, LBMI, HCM_Phenotype,
          VO2_FRIEND2_PP, VO2_WASSERMAN_PP, VeVco2_slope, HRR,
          e_prime_ave, med_peak_e_vel, lat_peak_e_vel,
          e_e_ave, la_vol_index, tr_max_vel, mv_e_a, mv_dec_time, ef_modsp4) %>%
   tbl_summary(
-    by = dd_grade,
+    by = fp_class,
     label = list(
       age              ~ "Age, years",
       Sex              ~ "Sex",
@@ -524,12 +572,12 @@ tbl_ase <- baseline_df %>%
   ) %>%
   add_p() %>%
   bold_labels() %>%
-  modify_caption("**Table: Patient Characteristics Stratified by ASE 2025 DD Grade**")
+  modify_caption("**Table: Patient Characteristics by LV Filling Pressure (ASE 2025 HCM Algorithm)**")
 
 tbl_ase
 
 tbl_ase %>% as_flex_table() %>%
-  save_as_docx(path = "../2_Output/Table_ASE2025_Stratified.docx")
+  save_as_docx(path = "../2_Output/Table_ASE2025_FillingPressure.docx")
 ```
 
 # GAMLSS / SEAMLSS Continuous Modeling
@@ -830,6 +878,11 @@ run_window <- function(w, idx, outcome_var = "VO2_FRIEND2_PP") {
     group_by(ID, CPX.sequential, cpx_test_date) %>%
     slice_min(order_by = delta_days, n = 1, with_ties = FALSE) %>%
     ungroup() %>%
+    mutate(
+      e_prime_ave = ifelse(!is.na(med_peak_e_vel) & !is.na(lat_peak_e_vel),
+                           (med_peak_e_vel + lat_peak_e_vel) / 2,
+                           coalesce(med_peak_e_vel, lat_peak_e_vel))
+    ) %>%
     mutate(across(any_of(c(idx, "age", "LBMI", outcome_var)), ~ as.numeric(as.character(.))),
            Sex = factor(Sex, levels = c(0, 1), labels = c("Male", "Female")))
 
@@ -854,6 +907,302 @@ sens <- bind_rows(lapply(diastolic_indices, function(idx) {
 
 write.csv(sens, "../2_Output/Sensitivity_EchoWindow_FRIEND2.csv", row.names = FALSE)
 ```
+
+# OMAR: Adaptive Threshold Discovery
+
+OMAR (Open Multivariate Adaptive Regression) is a modern, open-source implementation of the MARS (Multivariate Adaptive Regression Splines) algorithm. Unlike restricted cubic splines which require pre-specified knot locations, OMAR automatically discovers threshold breakpoints (hinge functions) in the data through a forward/backward stepwise procedure. This data-driven approach is particularly valuable for identifying clinically meaningful thresholds in the relationship between diastolic indices and cardiopulmonary fitness that may differ from guideline-derived cutoffs.
+
+```{python omar_analysis, eval=TRUE}
+import numpy as np
+import pandas as pd
+from omar import OMAR
+
+# Import baseline data from R via reticulate
+baseline_r = r.baseline_df
+
+# Prepare analysis dataframe
+omar_vars = ['e_e_ave', 'la_vol_index', 'tr_max_vel', 'e_prime_ave',
+             'mv_e_a', 'mv_dec_time', 'age', 'LBMI']
+outcome_vars = ['VO2_FRIEND2_PP', 'VeVco2_slope']
+diastolic_vars = {'e_e_ave', 'la_vol_index', 'tr_max_vel', 'e_prime_ave', 'mv_e_a', 'mv_dec_time'}
+
+df = baseline_r[omar_vars + outcome_vars + ['Sex']].copy()
+df['Sex_num'] = pd.to_numeric(df['Sex'].map({'Male': 0, 'Female': 1}), errors='coerce')
+df = df.drop(columns=['Sex'])
+
+# Run OMAR for each outcome
+omar_results = {}
+for outcome in outcome_vars:
+    predictors = [v for v in omar_vars if v != outcome] + ['Sex_num']
+    df_complete = df[predictors + [outcome]].dropna()
+
+    if len(df_complete) < 30:
+        continue
+
+    X_raw = df_complete[predictors].values.astype(np.float64)
+    y = df_complete[outcome].values.astype(np.float64)
+
+    # Standardize X to improve numerical stability (Cholesky in OMAR)
+    X_mean = np.nanmean(X_raw, axis=0)
+    X_std  = np.nanstd(X_raw, axis=0)
+    X_std[X_std == 0] = 1.0
+    X = (X_raw - X_mean) / X_std
+
+    # OMAR API: max_nbases, max_ncandidates (<= max_nbases), penalty (GCV)
+    try:
+        model = OMAR(max_nbases=10, max_ncandidates=10, penalty=3.0)
+        lof = model.find_bases(X, y)
+    except Exception as e:
+        print(f"  OMAR fitting failed for {outcome}: {e}")
+        continue
+
+    # Score: compute R²
+    y_pred = model(X)
+    ss_res = np.sum((y - y_pred)**2)
+    ss_tot = np.sum((y - y.mean())**2)
+    r2 = 1 - ss_res / ss_tot
+
+    # Extract active basis functions and their thresholds
+    # mask: 2D (max_nbases × max_nbases). Columns = basis functions. Rows = multiplicative factors.
+    # cov: variable index for each factor. root: knot value. truncated: hinge flag.
+    active_idx = np.where(np.any(model.mask, axis=0))[0]
+    basis_info = []
+    for j, bi in enumerate(active_idx):
+        active_rows = np.where(model.mask[:, bi])[0]
+        for row in active_rows:
+            var_idx = int(model.cov[row, bi])
+            knot_std = float(model.root[row, bi])
+            # Back-transform knot to original scale
+            knot = knot_std * X_std[var_idx] + X_mean[var_idx] if 0 <= var_idx < len(X_mean) else knot_std
+            is_hinge = bool(model.truncated[row, bi])
+            coef = float(model.coefficients[j]) if j < len(model.coefficients) else np.nan
+            var_name = predictors[var_idx] if 0 <= var_idx < len(predictors) else f"var_{var_idx}"
+            basis_info.append({
+                'outcome': outcome,
+                'variable': var_name,
+                'knot': round(knot, 2),
+                'type': 'hinge' if is_hinge else 'linear',
+                'coefficient': round(coef, 4),
+                'basis_index': int(bi)
+            })
+
+    # Store partial dependence data for plotting (back-transform x to original scale)
+    partial_dep = {}
+    for vi, vname in enumerate(predictors):
+        if vname not in diastolic_vars:
+            continue
+        x_range_std = np.linspace(np.nanpercentile(X[:, vi], 2),
+                                  np.nanpercentile(X[:, vi], 98), 200)
+        X_grid = np.tile(np.median(X, axis=0), (200, 1))
+        X_grid[:, vi] = x_range_std
+        y_grid = model(X_grid)
+        x_range_orig = x_range_std * X_std[vi] + X_mean[vi]
+        partial_dep[vname] = pd.DataFrame({
+            'x': x_range_orig, 'y_pred': y_grid,
+            'variable': vname, 'outcome': outcome
+        })
+
+    omar_results[outcome] = {
+        'basis': pd.DataFrame(basis_info) if basis_info else pd.DataFrame(),
+        'r2': round(r2, 4),
+        'lof': round(lof, 4),
+        'n': len(df_complete),
+        'predictors': predictors,
+        'partial_dep': pd.concat(partial_dep.values()) if partial_dep else pd.DataFrame(),
+        'X': df_complete[predictors],
+        'y': df_complete[outcome]
+    }
+
+# Print discovered thresholds
+for outcome, res in omar_results.items():
+    label = "Peak VO₂ (FRIEND 2.0 %pred)" if "VO2" in outcome else "VE/VCO₂ Slope"
+    print(f"\n{'='*60}")
+    print(f"OMAR Threshold Discovery: {label}")
+    print(f"  N = {res['n']}, R² = {res['r2']:.3f}, LOF = {res['lof']:.3f}")
+    print(f"{'='*60}")
+    if len(res['basis']) > 0:
+        diastolic_hits = res['basis'][res['basis']['variable'].isin(diastolic_vars)]
+        if len(diastolic_hits) > 0:
+            print("\n  Discovered diastolic thresholds:")
+            for _, row in diastolic_hits.iterrows():
+                print(f"    {row['variable']}: knot = {row['knot']}, "
+                      f"type = {row['type']}, coef = {row['coefficient']}")
+        else:
+            print("  No diastolic thresholds selected by OMAR.")
+
+        other_hits = res['basis'][~res['basis']['variable'].isin(diastolic_vars)]
+        if len(other_hits) > 0:
+            print("\n  Other selected variables:")
+            for _, row in other_hits.iterrows():
+                print(f"    {row['variable']}: knot = {row['knot']}, "
+                      f"type = {row['type']}, coef = {row['coefficient']}")
+    else:
+        print("  No basis functions extracted.")
+```
+
+```{r omar_export, results='asis'}
+# Export OMAR thresholds from Python results
+if (exists("omar_results", envir = reticulate::py)) {
+  py_res <- reticulate::py$omar_results
+  omar_thresholds <- bind_rows(lapply(names(py_res), function(outcome) {
+    res <- py_res[[outcome]]
+    bf_df <- res$basis
+    if (!is.null(bf_df) && nrow(bf_df) > 0) {
+      bf_df$r2  <- res$r2
+      bf_df$lof <- res$lof
+      bf_df$n   <- res$n
+      bf_df
+    }
+  }))
+
+  if (nrow(omar_thresholds) > 0) {
+    # Diastolic thresholds table
+    omar_diastolic <- omar_thresholds %>%
+      filter(variable %in% c("e_e_ave", "la_vol_index", "tr_max_vel",
+                               "e_prime_ave", "mv_e_a", "mv_dec_time")) %>%
+      mutate(across(where(is.numeric), ~ round(., 3)))
+
+    if (nrow(omar_diastolic) > 0) {
+      omar_diastolic %>%
+        flextable() %>%
+        bold(part = "header") %>%
+        theme_booktabs() %>%
+        autofit() %>%
+        set_caption("Table S. OMAR-Discovered Diastolic Thresholds for CPET Outcomes")
+    }
+
+    # Export to Supplemental folder
+    dir.create("../Manuscript/Supplemental", showWarnings = FALSE, recursive = TRUE)
+    write.csv(omar_thresholds,
+              "../Manuscript/Supplemental/Table_S1_OMAR_Thresholds.csv", row.names = FALSE)
+
+    # Compare OMAR knots to ASE 2025 cutoffs
+    ase_cutoffs <- tibble(
+      variable = c("e_e_ave", "la_vol_index", "tr_max_vel", "e_prime_ave", "mv_e_a", "mv_e_a"),
+      ase_cutoff = c(14, 34, 280, 6.5, 0.8, 2.0),
+      ase_direction = c(">", ">", ">", "<=", "<=", ">=")
+    )
+
+    omar_vs_ase <- omar_diastolic %>%
+      left_join(ase_cutoffs, by = "variable", relationship = "many-to-many") %>%
+      filter(!is.na(ase_cutoff))
+
+    if (nrow(omar_vs_ase) > 0) {
+      cat("\n\n**OMAR vs ASE 2025 Cutoff Comparison:**\n\n")
+      omar_vs_ase %>%
+        select(outcome, variable, omar_knot = knot, type, ase_cutoff, ase_direction) %>%
+        flextable() %>%
+        bold(part = "header") %>%
+        theme_booktabs() %>%
+        autofit() %>%
+        set_caption("OMAR-Discovered vs ASE 2025 Guideline Thresholds")
+
+      # Export to Supplemental
+      write.csv(omar_vs_ase %>%
+                  select(outcome, variable, omar_knot = knot, type, ase_cutoff, ase_direction),
+                "../Manuscript/Supplemental/Table_S2_OMAR_vs_ASE.csv", row.names = FALSE)
+    }
+  }
+}
+```
+
+```{r omar_figure, fig.width=6.9, fig.height=6.5}
+# OMAR partial dependence plots with discovered thresholds vs ASE 2025 cutoffs
+if (exists("omar_results", envir = reticulate::py)) {
+  py_res <- reticulate::py$omar_results
+
+  # Collect partial dependence curves and knot locations
+  pd_all <- bind_rows(lapply(names(py_res), function(outcome) {
+    res <- py_res[[outcome]]
+    if (!is.null(res$partial_dep) && nrow(res$partial_dep) > 0) {
+      res$partial_dep
+    }
+  }))
+
+  knots_all <- bind_rows(lapply(names(py_res), function(outcome) {
+    res <- py_res[[outcome]]
+    if (!is.null(res$basis) && nrow(res$basis) > 0) {
+      res$basis %>%
+        filter(type == "hinge",
+               variable %in% c("e_e_ave", "la_vol_index", "tr_max_vel",
+                                "e_prime_ave", "mv_e_a", "mv_dec_time"))
+    }
+  }))
+
+  # ASE 2025 reference cutoffs for overlay
+  ase_ref <- tibble(
+    variable = c("e_e_ave", "la_vol_index", "tr_max_vel", "e_prime_ave", "mv_e_a", "mv_e_a"),
+    ase_cutoff = c(14, 34, 280, 6.5, 0.8, 2.0),
+    label = c("ASE: >14", "ASE: >34", "ASE: >280", "ASE: \u22646.5", "ASE: \u22640.8", "ASE: \u22652.0")
+  )
+
+  # Variable display labels
+  var_labels <- c(
+    "e_e_ave"      = "E/e' (average)",
+    "la_vol_index"  = "LAVI (mL/m\u00B2)",
+    "tr_max_vel"    = "TR Vmax (cm/s)",
+    "e_prime_ave"   = "Average e' (cm/s)",
+    "mv_e_a"        = "E/A Ratio",
+    "mv_dec_time"   = "MV Decel Time (ms)"
+  )
+
+  outcome_labels <- c(
+    "VO2_FRIEND2_PP" = "Peak VO\u2082 (% Predicted)",
+    "VeVco2_slope"   = "VE/VCO\u2082 Slope"
+  )
+
+  if (nrow(pd_all) > 0) {
+    pd_all <- pd_all %>%
+      mutate(var_label = var_labels[variable],
+             outcome_label = outcome_labels[outcome])
+
+    # Build figure: partial dependence curves with OMAR knots and ASE cutoffs
+    fig_omar <- ggplot(pd_all, aes(x = x, y = y_pred)) +
+      geom_line(color = jacc_cols["navy"], linewidth = 1) +
+      # OMAR-discovered knots (solid red)
+      {if (nrow(knots_all) > 0) {
+        knots_plot <- knots_all %>%
+          mutate(var_label = var_labels[variable],
+                 outcome_label = outcome_labels[outcome])
+        geom_vline(data = knots_plot,
+                   aes(xintercept = knot),
+                   color = jacc_cols["red"], linetype = "solid", linewidth = 0.6)
+      }} +
+      # ASE 2025 cutoffs (dashed blue)
+      {
+        ase_plot <- ase_ref %>%
+          inner_join(pd_all %>% distinct(variable, outcome, var_label, outcome_label),
+                     by = "variable", relationship = "many-to-many")
+        if (nrow(ase_plot) > 0) {
+          geom_vline(data = ase_plot,
+                     aes(xintercept = ase_cutoff),
+                     color = jacc_cols["blue"], linetype = "dashed", linewidth = 0.5)
+        }
+      } +
+      facet_wrap(outcome_label ~ var_label, scales = "free", ncol = 3) +
+      labs(title = "OMAR Partial Dependence: Diastolic Indices and CPET Outcomes",
+           subtitle = "Solid red = OMAR-discovered knot | Dashed blue = ASE 2025 cutoff",
+           x = NULL,
+           y = "Predicted Outcome") +
+      theme_jacc() +
+      theme(strip.text = element_text(size = 7))
+
+    print(fig_omar)
+    save_jacc(fig_omar, "../2_Output/Figure_OMAR_Thresholds.pdf", w = 6.9, h = 6.5)
+    save_jacc(fig_omar, "../Manuscript/Supplemental/Figure_S1_OMAR_Thresholds.pdf", w = 6.9, h = 6.5)
+  }
+}
+```
+
+## OMAR Methods
+
+To complement guideline-based categorical grading with data-driven threshold discovery, we employed OMAR (Open Multivariate Adaptive Regression), a modern open-source implementation of the multivariate adaptive regression splines (MARS) algorithm (Walter et al., Technical University of Munich). OMAR uses a forward/backward stepwise procedure to automatically identify piecewise-linear breakpoints ("hinge functions") in the relationship between predictor variables and outcomes, without requiring pre-specified knot locations. In the forward pass, candidate basis functions are added at data-driven breakpoints where the slope of the predictor-outcome relationship changes; in the backward pass, basis functions that do not improve the generalized cross-validation (GCV) criterion are pruned, retaining only structurally important thresholds. Models were fit with a maximum of 15 basis functions and a GCV penalty of 3.0 to guard against overfitting. For each CPET outcome (Peak VO$_2$ [FRIEND 2.0 % predicted] and VE/VCO$_2$ slope), diastolic indices (E/e$'$, LAVI, TR V$_{max}$, average e$'$, E/A ratio, deceleration time) were included as candidate predictors alongside age, lean body mass index, and sex. Partial dependence curves were computed for each selected diastolic variable by varying it across its observed range while holding all other predictors at their median values. OMAR-discovered knots were compared against ASE 2025 guideline cutoffs to assess concordance between data-driven and expert-derived thresholds.
+
+## OMAR Results
+
+OMAR identified data-driven breakpoints in the relationship between diastolic indices and cardiopulmonary exercise capacity. Among the diastolic variables entered as candidates, OMAR retained those with structurally significant piecewise-linear associations, automatically discarding variables that did not improve model fit beyond the GCV penalty. Partial dependence plots illustrate the shape of these relationships, with OMAR-discovered knots (solid red lines) compared against corresponding ASE 2025 guideline cutoffs (dashed blue lines). Concordance between data-driven and guideline-derived thresholds supports the clinical validity of the ASE 2025 cutoffs in this HCM population; discordance identifies parameters where HCM-specific thresholds may warrant further investigation.
+
+*[Specific knot values and concordance/discordance findings to be reported after rendering.]*
 
 # Longitudinal GAMM Analysis
 
@@ -951,7 +1300,7 @@ if (nrow(gamm_df) >= 50 && n_distinct(gamm_df$ID) >= 20) {
 
 # Heart Failure Outcome Analysis
 
-Time-to-event analysis tests whether ASE 2025 DD grade and continuous DD Z-scores predict a composite heart failure endpoint (acute HF, chronic HF, transplant, or death).
+Time-to-event analysis tests whether ASE 2025 filling pressure classification (Normal vs Elevated) and continuous DD Z-scores predict a composite heart failure endpoint (acute HF, chronic HF, transplant, or death).
 
 ```{r hf_outcomes, fig.width=6.9, fig.height=5.0, results='asis'}
 surv_df <- baseline_df %>%
@@ -972,53 +1321,50 @@ cat(sprintf("Survival cohort: %d patients, %d events\n",
 
 if (nrow(surv_df) >= 30 && sum(surv_df$hf_composite == 1, na.rm = TRUE) >= 5) {
 
-  # Kaplan-Meier by DD grade
-  surv_grade <- surv_df %>% filter(dd_grade != "Indeterminate", !is.na(dd_grade))
+  # Kaplan-Meier by filling pressure classification
+  surv_fp <- surv_df %>% filter(fp_class != "Indeterminate", !is.na(fp_class))
 
-  if (nrow(surv_grade) >= 20) {
-    km_fit <- survfit(Surv(follow_up_yrs, hf_composite) ~ dd_grade, data = surv_grade)
+  if (nrow(surv_fp) >= 20) {
+    km_fit <- survfit(Surv(follow_up_yrs, hf_composite) ~ fp_class, data = surv_fp)
 
     # KM plot
     km_data <- broom::tidy(km_fit) %>%
-      mutate(strata = str_remove(strata, "dd_grade="))
+      mutate(strata = str_remove(strata, "fp_class="))
 
     fig5 <- ggplot(km_data, aes(x = time, y = estimate, color = strata)) +
       geom_step(linewidth = 0.9) +
       geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = strata),
-                  alpha = 0.1, stat = "identity") +
+                  alpha = 0.15, stat = "identity") +
       scale_color_manual(values = c("Normal" = jacc_cols["blue"],
-                                     "Grade I" = jacc_cols["green"],
-                                     "Grade II" = jacc_cols["orange"],
-                                     "Grade III" = jacc_cols["red"])) +
+                                     "Elevated" = jacc_cols["red"])) +
       scale_fill_manual(values = c("Normal" = jacc_cols["blue"],
-                                    "Grade I" = jacc_cols["green"],
-                                    "Grade II" = jacc_cols["orange"],
-                                    "Grade III" = jacc_cols["red"])) +
+                                    "Elevated" = jacc_cols["red"])) +
       scale_y_continuous(limits = c(0, 1), labels = percent) +
-      labs(title = "Composite HF Endpoint by ASE 2025 DD Grade",
+      labs(title = "Composite HF Endpoint by LV Filling Pressure",
+           subtitle = "ASE 2025 HCM-specific algorithm",
            x = "Years from Baseline CPET",
            y = "Event-Free Survival",
-           color = "DD Grade", fill = "DD Grade") +
+           color = "Filling Pressure", fill = "Filling Pressure") +
       theme_jacc() +
       theme(legend.position = "right")
 
     fig5
-    save_jacc(fig5, "../2_Output/Figure5_KM_DDGrade.pdf", w = 6.9, h = 5.0)
+    save_jacc(fig5, "../2_Output/Figure5_KM_FillingPressure.pdf", w = 6.9, h = 5.0)
 
     # Log-rank test
-    lr_test <- survdiff(Surv(follow_up_yrs, hf_composite) ~ dd_grade, data = surv_grade)
+    lr_test <- survdiff(Surv(follow_up_yrs, hf_composite) ~ fp_class, data = surv_fp)
     cat(sprintf("\n**Log-rank test p-value: %.4f**\n\n", 1 - pchisq(lr_test$chisq, df = length(lr_test$n) - 1)))
   }
 
-  # Cox proportional hazards: DD grade
-  cox_grade <- tryCatch({
-    coxph(Surv(follow_up_yrs, hf_composite) ~ dd_grade + age + Sex + LBMI,
-          data = surv_grade)
+  # Cox proportional hazards: Filling pressure (binary)
+  cox_fp <- tryCatch({
+    coxph(Surv(follow_up_yrs, hf_composite) ~ fp_class + age + Sex + LBMI,
+          data = surv_fp)
   }, error = function(e) NULL)
 
-  if (!is.null(cox_grade)) {
-    cat("\n**Cox Model: DD Grade**\n")
-    tidy(cox_grade, exponentiate = TRUE, conf.int = TRUE) %>%
+  if (!is.null(cox_fp)) {
+    cat("\n**Cox Model: Filling Pressure Classification**\n")
+    tidy(cox_fp, exponentiate = TRUE, conf.int = TRUE) %>%
       mutate(across(where(is.numeric), ~ round(., 3))) %>%
       flextable() %>%
       bold(part = "header") %>%
@@ -1027,11 +1373,11 @@ if (nrow(surv_df) >= 30 && sum(surv_df$hf_composite == 1, na.rm = TRUE) >= 5) {
       set_caption("Table 3. Cox Proportional Hazards: Composite HF Endpoint") %>%
       print()
 
-    write.csv(tidy(cox_grade, exponentiate = TRUE, conf.int = TRUE),
-              "../2_Output/Table3_Cox_DDGrade.csv", row.names = FALSE)
+    write.csv(tidy(cox_fp, exponentiate = TRUE, conf.int = TRUE),
+              "../2_Output/Table3_Cox_FillingPressure.csv", row.names = FALSE)
 
     # PH assumption check
-    ph_check <- cox.zph(cox_grade)
+    ph_check <- cox.zph(cox_fp)
     cat(sprintf("\n**Proportional hazards global test p = %.3f**\n", ph_check$table["GLOBAL", "p"]))
   }
 
@@ -1067,14 +1413,14 @@ table1_data <- baseline_df %>%
     VeVco2_slope = as.numeric(as.character(VeVco2_slope)),
     HCM_Phenotype = as.factor(HCM_Phenotype)
   ) %>%
-  select(dd_grade, age, Sex, BMI, BSA, LBMI, HCM_Phenotype,
+  select(fp_class, age, Sex, BMI, BSA, LBMI, HCM_Phenotype,
          pk.RER, VO2_FRIEND2_PP, VO2_WASSERMAN_PP, VeVco2_slope, HRR,
          e_prime_ave, med_peak_e_vel, lat_peak_e_vel,
          e_e_ave, la_vol_index, E_vel, tr_max_vel, mv_e_a, mv_dec_time, ef_modsp4)
 
 # Overall
 table1_overall <- table1_data %>%
-  select(-dd_grade) %>%
+  select(-fp_class) %>%
   tbl_summary(
     label = list(
       age              ~ "Age, years",
@@ -1372,282 +1718,6 @@ if (nrow(missing_echo) > 0) {
               nrow(missing_echo), n_distinct(missing_echo$ID)))
 }
 ```
-
-## OMAR: Adaptive Threshold Discovery
-
-OMAR (Open Multivariate Adaptive Regression) is a modern, open-source implementation of the MARS (Multivariate Adaptive Regression Splines) algorithm. Unlike restricted cubic splines which require pre-specified knot locations, OMAR automatically discovers threshold breakpoints (hinge functions) in the data through a forward/backward stepwise procedure. This data-driven approach is particularly valuable for identifying clinically meaningful thresholds in the relationship between diastolic indices and cardiopulmonary fitness that may differ from guideline-derived cutoffs.
-
-```{python omar_analysis, eval=TRUE}
-import numpy as np
-import pandas as pd
-from omar import OMAR
-
-# Import baseline data from R via reticulate
-baseline_r = r.baseline_df
-
-# Prepare analysis dataframe
-omar_vars = ['e_e_ave', 'la_vol_index', 'tr_max_vel', 'e_prime_ave',
-             'mv_e_a', 'mv_dec_time', 'age', 'LBMI']
-outcome_vars = ['VO2_FRIEND2_PP', 'VeVco2_slope']
-diastolic_vars = {'e_e_ave', 'la_vol_index', 'tr_max_vel', 'e_prime_ave', 'mv_e_a', 'mv_dec_time'}
-
-df = baseline_r[omar_vars + outcome_vars + ['Sex']].copy()
-df['Sex_num'] = pd.to_numeric(df['Sex'].map({'Male': 0, 'Female': 1}), errors='coerce')
-df = df.drop(columns=['Sex'])
-
-# Run OMAR for each outcome
-omar_results = {}
-for outcome in outcome_vars:
-    predictors = [v for v in omar_vars if v != outcome] + ['Sex_num']
-    df_complete = df[predictors + [outcome]].dropna()
-
-    if len(df_complete) < 30:
-        continue
-
-    X = df_complete[predictors].values.astype(np.float64)
-    y = df_complete[outcome].values.astype(np.float64)
-
-    # OMAR API: max_nbases, max_ncandidates (<= max_nbases), penalty (GCV)
-    model = OMAR(max_nbases=15, max_ncandidates=15, penalty=3.0)
-    lof = model.find_bases(X, y)
-
-    # Score: compute R²
-    y_pred = model(X)
-    ss_res = np.sum((y - y_pred)**2)
-    ss_tot = np.sum((y - y.mean())**2)
-    r2 = 1 - ss_res / ss_tot
-
-    # Extract active basis functions and their thresholds
-    # mask: 2D (max_nbases × max_nbases). Columns = basis functions. Rows = multiplicative factors.
-    # cov: variable index for each factor. root: knot value. truncated: hinge flag.
-    active_idx = np.where(np.any(model.mask, axis=0))[0]
-    basis_info = []
-    for j, bi in enumerate(active_idx):
-        active_rows = np.where(model.mask[:, bi])[0]
-        for row in active_rows:
-            var_idx = int(model.cov[row, bi])
-            knot = float(model.root[row, bi])
-            is_hinge = bool(model.truncated[row, bi])
-            coef = float(model.coefficients[j]) if j < len(model.coefficients) else np.nan
-            var_name = predictors[var_idx] if 0 <= var_idx < len(predictors) else f"var_{var_idx}"
-            basis_info.append({
-                'outcome': outcome,
-                'variable': var_name,
-                'knot': round(knot, 2),
-                'type': 'hinge' if is_hinge else 'linear',
-                'coefficient': round(coef, 4),
-                'basis_index': int(bi)
-            })
-
-    # Store partial dependence data for plotting
-    # For each diastolic variable, compute univariate OMAR prediction curve
-    partial_dep = {}
-    for vi, vname in enumerate(predictors):
-        if vname not in diastolic_vars:
-            continue
-        x_range = np.linspace(np.nanpercentile(X[:, vi], 2),
-                              np.nanpercentile(X[:, vi], 98), 200)
-        X_grid = np.tile(np.median(X, axis=0), (200, 1))
-        X_grid[:, vi] = x_range
-        y_grid = model(X_grid)
-        partial_dep[vname] = pd.DataFrame({
-            'x': x_range, 'y_pred': y_grid,
-            'variable': vname, 'outcome': outcome
-        })
-
-    omar_results[outcome] = {
-        'basis': pd.DataFrame(basis_info) if basis_info else pd.DataFrame(),
-        'r2': round(r2, 4),
-        'lof': round(lof, 4),
-        'n': len(df_complete),
-        'predictors': predictors,
-        'partial_dep': pd.concat(partial_dep.values()) if partial_dep else pd.DataFrame(),
-        'X': df_complete[predictors],
-        'y': df_complete[outcome]
-    }
-
-# Print discovered thresholds
-for outcome, res in omar_results.items():
-    label = "Peak VO₂ (FRIEND 2.0 %pred)" if "VO2" in outcome else "VE/VCO₂ Slope"
-    print(f"\n{'='*60}")
-    print(f"OMAR Threshold Discovery: {label}")
-    print(f"  N = {res['n']}, R² = {res['r2']:.3f}, LOF = {res['lof']:.3f}")
-    print(f"{'='*60}")
-    if len(res['basis']) > 0:
-        diastolic_hits = res['basis'][res['basis']['variable'].isin(diastolic_vars)]
-        if len(diastolic_hits) > 0:
-            print("\n  Discovered diastolic thresholds:")
-            for _, row in diastolic_hits.iterrows():
-                print(f"    {row['variable']}: knot = {row['knot']}, "
-                      f"type = {row['type']}, coef = {row['coefficient']}")
-        else:
-            print("  No diastolic thresholds selected by OMAR.")
-
-        other_hits = res['basis'][~res['basis']['variable'].isin(diastolic_vars)]
-        if len(other_hits) > 0:
-            print("\n  Other selected variables:")
-            for _, row in other_hits.iterrows():
-                print(f"    {row['variable']}: knot = {row['knot']}, "
-                      f"type = {row['type']}, coef = {row['coefficient']}")
-    else:
-        print("  No basis functions extracted.")
-```
-
-```{r omar_export, results='asis'}
-# Export OMAR thresholds from Python results
-if (exists("omar_results", envir = reticulate::py)) {
-  py_res <- reticulate::py$omar_results
-  omar_thresholds <- bind_rows(lapply(names(py_res), function(outcome) {
-    res <- py_res[[outcome]]
-    bf_df <- res$basis
-    if (!is.null(bf_df) && nrow(bf_df) > 0) {
-      bf_df$r2  <- res$r2
-      bf_df$lof <- res$lof
-      bf_df$n   <- res$n
-      bf_df
-    }
-  }))
-
-  if (nrow(omar_thresholds) > 0) {
-    # Diastolic thresholds table
-    omar_diastolic <- omar_thresholds %>%
-      filter(variable %in% c("e_e_ave", "la_vol_index", "tr_max_vel",
-                               "e_prime_ave", "mv_e_a", "mv_dec_time")) %>%
-      mutate(across(where(is.numeric), ~ round(., 3)))
-
-    if (nrow(omar_diastolic) > 0) {
-      omar_diastolic %>%
-        flextable() %>%
-        bold(part = "header") %>%
-        theme_booktabs() %>%
-        autofit() %>%
-        set_caption("Table S. OMAR-Discovered Diastolic Thresholds for CPET Outcomes")
-    }
-
-    write.csv(omar_thresholds,
-              "../2_Output/Table_OMAR_Thresholds.csv", row.names = FALSE)
-
-    # Compare OMAR knots to ASE 2025 cutoffs
-    ase_cutoffs <- tibble(
-      variable = c("e_e_ave", "la_vol_index", "tr_max_vel", "e_prime_ave", "mv_e_a", "mv_e_a"),
-      ase_cutoff = c(14, 34, 280, 6.5, 0.8, 2.0),
-      ase_direction = c(">", ">", ">", "<=", "<=", ">=")
-    )
-
-    omar_vs_ase <- omar_diastolic %>%
-      left_join(ase_cutoffs, by = "variable", relationship = "many-to-many") %>%
-      filter(!is.na(ase_cutoff))
-
-    if (nrow(omar_vs_ase) > 0) {
-      cat("\n\n**OMAR vs ASE 2025 Cutoff Comparison:**\n\n")
-      omar_vs_ase %>%
-        select(outcome, variable, omar_knot = knot, type, ase_cutoff, ase_direction) %>%
-        flextable() %>%
-        bold(part = "header") %>%
-        theme_booktabs() %>%
-        autofit() %>%
-        set_caption("OMAR-Discovered vs ASE 2025 Guideline Thresholds")
-    }
-  }
-}
-```
-
-```{r omar_figure, fig.width=6.9, fig.height=6.5, results='asis'}
-# OMAR partial dependence plots with discovered thresholds vs ASE 2025 cutoffs
-if (exists("omar_results", envir = reticulate::py)) {
-  py_res <- reticulate::py$omar_results
-
-  # Collect partial dependence curves and knot locations
-  pd_all <- bind_rows(lapply(names(py_res), function(outcome) {
-    res <- py_res[[outcome]]
-    if (!is.null(res$partial_dep) && nrow(res$partial_dep) > 0) {
-      res$partial_dep
-    }
-  }))
-
-  knots_all <- bind_rows(lapply(names(py_res), function(outcome) {
-    res <- py_res[[outcome]]
-    if (!is.null(res$basis) && nrow(res$basis) > 0) {
-      res$basis %>%
-        filter(type == "hinge",
-               variable %in% c("e_e_ave", "la_vol_index", "tr_max_vel",
-                                "e_prime_ave", "mv_e_a", "mv_dec_time"))
-    }
-  }))
-
-  # ASE 2025 reference cutoffs for overlay
-  ase_ref <- tibble(
-    variable = c("e_e_ave", "la_vol_index", "tr_max_vel", "e_prime_ave", "mv_e_a", "mv_e_a"),
-    ase_cutoff = c(14, 34, 280, 6.5, 0.8, 2.0),
-    label = c("ASE: >14", "ASE: >34", "ASE: >280", "ASE: \u22646.5", "ASE: \u22640.8", "ASE: \u22652.0")
-  )
-
-  # Variable display labels
-  var_labels <- c(
-    "e_e_ave"      = "E/e' (average)",
-    "la_vol_index"  = "LAVI (mL/m\u00B2)",
-    "tr_max_vel"    = "TR Vmax (cm/s)",
-    "e_prime_ave"   = "Average e' (cm/s)",
-    "mv_e_a"        = "E/A Ratio",
-    "mv_dec_time"   = "MV Decel Time (ms)"
-  )
-
-  outcome_labels <- c(
-    "VO2_FRIEND2_PP" = "Peak VO\u2082 (% Predicted)",
-    "VeVco2_slope"   = "VE/VCO\u2082 Slope"
-  )
-
-  if (nrow(pd_all) > 0) {
-    pd_all <- pd_all %>%
-      mutate(var_label = var_labels[variable],
-             outcome_label = outcome_labels[outcome])
-
-    # Build figure: partial dependence curves with OMAR knots and ASE cutoffs
-    fig_omar <- ggplot(pd_all, aes(x = x, y = y_pred)) +
-      geom_line(color = jacc_cols["navy"], linewidth = 1) +
-      # OMAR-discovered knots (solid red)
-      {if (nrow(knots_all) > 0) {
-        knots_plot <- knots_all %>%
-          mutate(var_label = var_labels[variable],
-                 outcome_label = outcome_labels[outcome])
-        geom_vline(data = knots_plot,
-                   aes(xintercept = knot),
-                   color = jacc_cols["red"], linetype = "solid", linewidth = 0.6)
-      }} +
-      # ASE 2025 cutoffs (dashed blue)
-      {
-        ase_plot <- ase_ref %>%
-          inner_join(pd_all %>% distinct(variable, outcome, var_label, outcome_label),
-                     by = "variable", relationship = "many-to-many")
-        if (nrow(ase_plot) > 0) {
-          geom_vline(data = ase_plot,
-                     aes(xintercept = ase_cutoff),
-                     color = jacc_cols["blue"], linetype = "dashed", linewidth = 0.5)
-        }
-      } +
-      facet_wrap(outcome_label ~ var_label, scales = "free", ncol = 3) +
-      labs(title = "OMAR Partial Dependence: Diastolic Indices and CPET Outcomes",
-           subtitle = "Solid red = OMAR-discovered knot | Dashed blue = ASE 2025 cutoff",
-           x = NULL,
-           y = "Predicted Outcome") +
-      theme_jacc() +
-      theme(strip.text = element_text(size = 7))
-
-    fig_omar
-    save_jacc(fig_omar, "../2_Output/Figure_OMAR_Thresholds.pdf", w = 6.9, h = 6.5)
-  }
-}
-```
-
-### OMAR Methods
-
-To complement guideline-based categorical grading with data-driven threshold discovery, we employed OMAR (Open Multivariate Adaptive Regression), a modern open-source implementation of the multivariate adaptive regression splines (MARS) algorithm (Walter et al., Technical University of Munich). OMAR uses a forward/backward stepwise procedure to automatically identify piecewise-linear breakpoints ("hinge functions") in the relationship between predictor variables and outcomes, without requiring pre-specified knot locations. In the forward pass, candidate basis functions are added at data-driven breakpoints where the slope of the predictor-outcome relationship changes; in the backward pass, basis functions that do not improve the generalized cross-validation (GCV) criterion are pruned, retaining only structurally important thresholds. Models were fit with a maximum of 15 basis functions and a GCV penalty of 3.0 to guard against overfitting. For each CPET outcome (Peak VO$_2$ [FRIEND 2.0 % predicted] and VE/VCO$_2$ slope), diastolic indices (E/e$'$, LAVI, TR V$_{max}$, average e$'$, E/A ratio, deceleration time) were included as candidate predictors alongside age, lean body mass index, and sex. Partial dependence curves were computed for each selected diastolic variable by varying it across its observed range while holding all other predictors at their median values. OMAR-discovered knots were compared against ASE 2025 guideline cutoffs to assess concordance between data-driven and expert-derived thresholds.
-
-### OMAR Results
-
-OMAR identified data-driven breakpoints in the relationship between diastolic indices and cardiopulmonary exercise capacity. Among the diastolic variables entered as candidates, OMAR retained those with structurally significant piecewise-linear associations, automatically discarding variables that did not improve model fit beyond the GCV penalty. Partial dependence plots illustrate the shape of these relationships, with OMAR-discovered knots (solid red lines) compared against corresponding ASE 2025 guideline cutoffs (dashed blue lines). Concordance between data-driven and guideline-derived thresholds supports the clinical validity of the ASE 2025 cutoffs in this HCM population; discordance identifies parameters where HCM-specific thresholds may warrant further investigation.
-
-*[Specific knot values and concordance/discordance findings to be reported after rendering.]*
 
 ```{r session_info}
 cat("\n\n---\n**Session Info:**\n")
