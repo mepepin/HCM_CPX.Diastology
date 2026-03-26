@@ -53,6 +53,8 @@ suppressPackageStartupMessages({
   library(gamlss)
 })
 
+is_gfm <- grepl("^(gfm|commonmark)", knitr::pandoc_to())
+
 # ── JACC color palette (colorblind-safe) ─────────────────────────────────────
 jacc_cols <- c(
   navy    = "#2C3E50",
@@ -474,10 +476,16 @@ tbl_ase <- baseline_df %>%
   bold_labels() %>%
   modify_caption("**Table: Patient Characteristics Stratified by ASE 2025 DD Grade**")
 
-tbl_ase
+if (is_gfm) {
+  cat("Stratified baseline characteristics table: [outputs/tables/Table_ASE2025_Stratified.docx](outputs/tables/Table_ASE2025_Stratified.docx)\n")
+} else {
+  tbl_ase
+}
 
-tbl_ase %>% as_flex_table() %>%
-  save_as_docx(path = "outputs/tables/Table_ASE2025_Stratified.docx")
+invisible(
+  tbl_ase %>% as_flex_table() %>%
+    save_as_docx(path = "outputs/tables/Table_ASE2025_Stratified.docx")
+)
 ```
 
 # GAMLSS / SEAMLSS Continuous Modeling
@@ -603,13 +611,22 @@ if (length(gamlss_results) > 0) {
     s
   }))
 
-  gamlss_summary %>%
-    mutate(across(where(is.numeric), ~ round(., 4))) %>%
-    flextable() %>%
-    bold(part = "header") %>%
-    theme_booktabs() %>%
-    autofit() %>%
-    set_caption("Table 2. GAMLSS Model Coefficients for Diastolic Indices vs Peak VO\u2082")
+  gamlss_summary_fmt <- gamlss_summary %>%
+    mutate(across(where(is.numeric), ~ round(., 4)))
+
+  if (is_gfm) {
+    knitr::kable(
+      gamlss_summary_fmt,
+      caption = "Table 2. GAMLSS Model Coefficients for Diastolic Indices vs Peak VO2"
+    )
+  } else {
+    gamlss_summary_fmt %>%
+      flextable() %>%
+      bold(part = "header") %>%
+      theme_booktabs() %>%
+      autofit() %>%
+      set_caption("Table 2. GAMLSS Model Coefficients for Diastolic Indices vs Peak VO\u2082")
+  }
 
   write.csv(gamlss_summary,
             "outputs/tables/Table2_GAMLSS_Coefficients.csv", row.names = FALSE)
@@ -955,14 +972,23 @@ if (nrow(surv_df) >= 30 && sum(surv_df$hf_composite == 1, na.rm = TRUE) >= 5) {
 
   if (!is.null(cox_grade)) {
     cat("\n**Cox Model: DD Grade**\n")
-    tidy(cox_grade, exponentiate = TRUE, conf.int = TRUE) %>%
-      mutate(across(where(is.numeric), ~ round(., 3))) %>%
-      flextable() %>%
-      bold(part = "header") %>%
-      theme_booktabs() %>%
-      autofit() %>%
-      set_caption("Table 3. Cox Proportional Hazards: Composite HF Endpoint") %>%
-      print()
+    cox_grade_tbl <- tidy(cox_grade, exponentiate = TRUE, conf.int = TRUE) %>%
+      mutate(across(where(is.numeric), ~ round(., 3)))
+
+    if (is_gfm) {
+      print(knitr::kable(
+        cox_grade_tbl,
+        caption = "Table 3. Cox Proportional Hazards: Composite HF Endpoint"
+      ))
+    } else {
+      cox_grade_tbl %>%
+        flextable() %>%
+        bold(part = "header") %>%
+        theme_booktabs() %>%
+        autofit() %>%
+        set_caption("Table 3. Cox Proportional Hazards: Composite HF Endpoint") %>%
+        print()
+    }
 
     write.csv(tidy(cox_grade, exponentiate = TRUE, conf.int = TRUE),
               "outputs/tables/Table3_Cox_DDGrade.csv", row.names = FALSE)
@@ -981,9 +1007,18 @@ if (nrow(surv_df) >= 30 && sum(surv_df$hf_composite == 1, na.rm = TRUE) >= 5) {
       cox_z <- coxph(Surv(follow_up_yrs, hf_composite) ~ dd_zscore + age + Sex + LBMI,
                      data = surv_z)
       cat("\n**Cox Model: Continuous DD Z-Score**\n")
-      tidy(cox_z, exponentiate = TRUE, conf.int = TRUE) %>%
-        mutate(across(where(is.numeric), ~ round(., 3))) %>%
-        flextable() %>% bold(part = "header") %>% theme_booktabs() %>% autofit() %>% print()
+      cox_z_tbl <- tidy(cox_z, exponentiate = TRUE, conf.int = TRUE) %>%
+        mutate(across(where(is.numeric), ~ round(., 3)))
+
+      if (is_gfm) {
+        print(knitr::kable(
+          cox_z_tbl,
+          caption = "Continuous DD Z-Score Cox Model"
+        ))
+      } else {
+        cox_z_tbl %>%
+          flextable() %>% bold(part = "header") %>% theme_booktabs() %>% autofit() %>% print()
+      }
 
       write.csv(tidy(cox_z, exponentiate = TRUE, conf.int = TRUE),
                 "outputs/tables/Table3_Cox_DDZscore.csv", row.names = FALSE)
@@ -1038,11 +1073,17 @@ table1_overall <- table1_data %>%
   bold_labels() %>%
   modify_caption("**Table 1. Baseline Patient Characteristics**")
 
-table1_overall
+if (is_gfm) {
+  cat("Baseline characteristics table: [outputs/tables/Table1_Manuscript.docx](outputs/tables/Table1_Manuscript.docx)\n")
+} else {
+  table1_overall
+}
 
-table1_overall %>%
-  as_flex_table() %>%
-  save_as_docx(path = "outputs/tables/Table1_Manuscript.docx")
+invisible(
+  table1_overall %>%
+    as_flex_table() %>%
+    save_as_docx(path = "outputs/tables/Table1_Manuscript.docx")
+)
 ```
 
 ## Figure 1: Cohort Characteristics
@@ -1235,12 +1276,19 @@ resid_summary <- bind_rows(lapply(diastolic_indices, function(idx) {
   )
 }))
 
-resid_summary %>%
-  flextable() %>%
-  bold(part = "header") %>%
-  theme_booktabs() %>%
-  autofit() %>%
-  set_caption("Table S. Age-Residualized Diastolic Indices Summary")
+if (is_gfm) {
+  knitr::kable(
+    resid_summary,
+    caption = "Table S. Age-Residualized Diastolic Indices Summary"
+  )
+} else {
+  resid_summary %>%
+    flextable() %>%
+    bold(part = "header") %>%
+    theme_booktabs() %>%
+    autofit() %>%
+    set_caption("Table S. Age-Residualized Diastolic Indices Summary")
+}
 
 # Diagnostic boxplot
 resid_long <- baseline_df_resid %>%
