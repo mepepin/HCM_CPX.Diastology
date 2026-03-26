@@ -11,6 +11,12 @@ format:
     code-tools: true
     code-fold: true
     self-contained: true
+  gfm:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    fig-format: png
+    df-print: kable
 execute:
   echo: false
   warning: false
@@ -22,8 +28,7 @@ knitr::opts_chunk$set(
   fig.width = 6.9,
   fig.height = 4.5,
   dpi = 300,
-  dev = "cairo_pdf",
-  dev.args = list(family = "Arial")
+  dev = "png"
 )
 
 # ── Package loading ──────────────────────────────────────────────────────────
@@ -101,8 +106,19 @@ residualize_on_age <- function(df, idx) {
 }
 
 # ── Output directory ─────────────────────────────────────────────────────────
-dir.create("../2_Output", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/figures", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/tables", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/stats", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/audit", recursive = TRUE, showWarnings = FALSE)
 ```
+
+## Repository Artifacts
+
+- [Quarto source](README_HCM.Diastology.qmd)
+- [Figures](outputs/figures/)
+- [Tables](outputs/tables/)
+- [Supporting statistics](outputs/stats/)
+- [Echo linkage audit](outputs/audit/Serial_CPX_missing_resting_echo.xlsx)
 
 # Data Import and Cohort Assembly
 
@@ -111,7 +127,7 @@ dir.create("../2_Output", recursive = TRUE, showWarnings = FALSE)
 The initial phase imports raw Cardiopulmonary Exercise Testing (CPET) data, assigns a stable patient identifier (ID) per MRN, retains patients with serial testing ($\geq 2$ sessions), restricts to HCM with adequate effort (peak RER $\geq 1.0$), and derives biometric indices (BSA, BMI, LBMI).
 
 ```{r cpx_cleaning}
-CPX <- read.xlsx("../1_Input/CPX_input.xlsx", sheet = "CPX", detectDates = TRUE)
+CPX <- read.xlsx("1_Input/CPX_input.xlsx", sheet = "CPX", detectDates = TRUE)
 
 CPX_with_id <- CPX %>%
   group_by(MRN) %>%
@@ -174,7 +190,7 @@ cat(sprintf("CPX tests (HCM, adequate effort): %d tests, %d patients\n",
 Patients with documented CAD, COPD, or interstitial lung disease are excluded so that exercise limitations are attributable to HCM-specific pathology.
 
 ```{r comorbidities}
-Comorbidities_table <- read.xlsx("../1_Input/CPX_input.xlsx",
+Comorbidities_table <- read.xlsx("1_Input/CPX_input.xlsx",
                                   sheet = "co-morbidities", detectDates = TRUE)
 
 Comorbidities_to_filter <- Comorbidities_table %>%
@@ -200,7 +216,7 @@ filter_flow <- bind_rows(filter_flow, tibble(
 Each CPET is aligned with the closest prior resting echocardiogram within a configurable window (default 365 days).
 
 ```{r echo_merge}
-echo_raw <- read.xlsx("../1_Input/mark_extract_20260316.xlsx", sheet = 1, detectDates = TRUE)
+echo_raw <- read.xlsx("1_Input/mark_extract_20260316.xlsx", sheet = 1, detectDates = TRUE)
 
 echo_vars_core <- c(
   "e_e_ave", "e_e_lat", "e_e_med", "mv_a_dur", "mv_a_point", "mv_dec_time",
@@ -262,7 +278,7 @@ cat(sprintf("Baseline cohort: %d patients\nLongitudinal observations: %d\n",
 ## Import clinical outcomes
 
 ```{r outcomes_import}
-outcomes_raw <- read.xlsx("../1_Input/CPX_input.xlsx", sheet = "Outcomes_2025", detectDates = TRUE)
+outcomes_raw <- read.xlsx("1_Input/CPX_input.xlsx", sheet = "Outcomes_2025", detectDates = TRUE)
 
 outcomes <- outcomes_raw %>%
   mutate(MRN = as.character(MRN)) %>%
@@ -329,7 +345,7 @@ p_flow <- filter_flow %>%
   theme_jacc()
 
 p_flow
-save_jacc(p_flow, "../2_Output/Cohort_Filtering_Workflow.pdf", w = 6.9, h = 3.8)
+save_jacc(p_flow, "outputs/figures/Cohort_Filtering_Workflow.pdf", w = 6.9, h = 3.8)
 ```
 
 # ASE 2025 Diastolic Dysfunction Grading
@@ -423,7 +439,7 @@ fig_ase <- (p_bar | p_box | p_vevco2_grade) +
   theme(plot.tag = element_text(face = "bold", size = 11))
 
 fig_ase
-save_jacc(fig_ase, "../2_Output/Figure_ASE2025_DDGrade.pdf", w = 6.9, h = 4.0)
+save_jacc(fig_ase, "outputs/figures/Figure_ASE2025_DDGrade.pdf", w = 6.9, h = 4.0)
 ```
 
 ```{r ase_stratified_table, results='asis'}
@@ -461,7 +477,7 @@ tbl_ase <- baseline_df %>%
 tbl_ase
 
 tbl_ase %>% as_flex_table() %>%
-  save_as_docx(path = "../2_Output/Table_ASE2025_Stratified.docx")
+  save_as_docx(path = "outputs/tables/Table_ASE2025_Stratified.docx")
 ```
 
 # GAMLSS / SEAMLSS Continuous Modeling
@@ -565,7 +581,7 @@ if (length(gamlss_results) > 0) {
     theme(plot.tag = element_text(face = "bold", size = 11))
 
   fig_gamlss
-  save_jacc(fig_gamlss, "../2_Output/Figure_GAMLSS_SEAMLSS.pdf", w = 6.9, h = 6.5)
+  save_jacc(fig_gamlss, "outputs/figures/Figure_GAMLSS_SEAMLSS.pdf", w = 6.9, h = 6.5)
 }
 ```
 
@@ -596,7 +612,7 @@ if (length(gamlss_results) > 0) {
     set_caption("Table 2. GAMLSS Model Coefficients for Diastolic Indices vs Peak VO\u2082")
 
   write.csv(gamlss_summary,
-            "../2_Output/Table2_GAMLSS_Coefficients.csv", row.names = FALSE)
+            "outputs/tables/Table2_GAMLSS_Coefficients.csv", row.names = FALSE)
 }
 ```
 
@@ -663,7 +679,7 @@ for (idx in diastolic_indices) {
 }
 
 lrt_table <- bind_rows(lrt_results) %>% arrange(p_value)
-write.csv(lrt_table, "../2_Output/Stats_CrossSectional_LRT_FRIEND2.csv", row.names = FALSE)
+write.csv(lrt_table, "outputs/stats/Stats_CrossSectional_LRT_FRIEND2.csv", row.names = FALSE)
 print(knitr::kable(lrt_table %>% mutate(across(where(is.numeric), ~ round(., 3))),
                    caption = "Likelihood Ratio Tests: Diastolic Indices vs Peak VO2 (FRIEND 2.0)"))
 
@@ -686,7 +702,7 @@ if (length(vo2_models) > 0) {
     theme_jacc()
 
   fig3
-  save_jacc(fig3, "../2_Output/Figure3_Nonlinear_DiastolicIndices_FRIEND2.pdf", w = 6.9, h = 6.5)
+  save_jacc(fig3, "outputs/figures/Figure3_Nonlinear_DiastolicIndices_FRIEND2.pdf", w = 6.9, h = 6.5)
 }
 ```
 
@@ -716,7 +732,7 @@ for (idx in diastolic_indices) {
 }
 
 vevco2_lrt_table <- bind_rows(vevco2_lrt) %>% arrange(p_value)
-write.csv(vevco2_lrt_table, "../2_Output/Stats_CrossSectional_LRT_VeVco2.csv", row.names = FALSE)
+write.csv(vevco2_lrt_table, "outputs/stats/Stats_CrossSectional_LRT_VeVco2.csv", row.names = FALSE)
 
 if (length(vevco2_models) > 0) {
   pp_vevco2 <- bind_rows(lapply(names(vevco2_models), function(idx) {
@@ -727,7 +743,7 @@ if (length(vevco2_models) > 0) {
   }))
 
   fig_vevco2 <- ggplot(pp_vevco2, aes(x = x, y = fit)) +
-    geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.15, fill = jacc_cols["orange"]) +
+    geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.15, fill = jacc_cols["orange"]) +
     geom_line(linewidth = 0.9, color = jacc_cols["red"]) +
     facet_wrap(~ label, scales = "free_x", nrow = 3) +
     labs(title = bquote(bold("Nonlinear Association: Diastolic Indices and" ~ VE/VCO[2] ~ "Slope")),
@@ -736,7 +752,7 @@ if (length(vevco2_models) > 0) {
     theme_jacc()
 
   fig_vevco2
-  save_jacc(fig_vevco2, "../2_Output/FigureS_Nonlinear_DiastolicIndices_VeVco2.pdf", w = 6.9, h = 6.5)
+  save_jacc(fig_vevco2, "outputs/figures/FigureS_Nonlinear_DiastolicIndices_VeVco2.pdf", w = 6.9, h = 6.5)
 }
 ```
 
@@ -773,7 +789,7 @@ sens <- bind_rows(lapply(diastolic_indices, function(idx) {
   bind_rows(run_window(180, idx), run_window(365, idx), run_window(730, idx))
 }))
 
-write.csv(sens, "../2_Output/Sensitivity_EchoWindow_FRIEND2.csv", row.names = FALSE)
+write.csv(sens, "outputs/stats/Sensitivity_EchoWindow_FRIEND2.csv", row.names = FALSE)
 ```
 
 # Longitudinal GAMM Analysis
@@ -833,9 +849,9 @@ if (nrow(gamm_df) >= 50 && n_distinct(gamm_df$ID) >= 20) {
   print(gamm_summary$s.table)
 
   write.csv(as.data.frame(gamm_summary$s.table),
-            "../2_Output/Stats_GAMM_SmoothTerms.csv")
+            "outputs/stats/Stats_GAMM_SmoothTerms.csv")
   write.csv(as.data.frame(gamm_summary$p.table),
-            "../2_Output/Stats_GAMM_ParametricTerms.csv")
+            "outputs/stats/Stats_GAMM_ParametricTerms.csv")
 
   # Prediction: trajectories stratified by DD Z-score tertiles
   z_tertiles <- quantile(gamm_df$dd_zscore, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
@@ -866,7 +882,7 @@ if (nrow(gamm_df) >= 50 && n_distinct(gamm_df$ID) >= 20) {
     theme(legend.position = "right")
 
   fig4
-  save_jacc(fig4, "../2_Output/Figure4_GAMM_Trajectories.pdf", w = 6.9, h = 5.0)
+  save_jacc(fig4, "outputs/figures/Figure4_GAMM_Trajectories.pdf", w = 6.9, h = 5.0)
 }
 ```
 
@@ -924,7 +940,7 @@ if (nrow(surv_df) >= 30 && sum(surv_df$hf_composite == 1, na.rm = TRUE) >= 5) {
       theme(legend.position = "right")
 
     fig5
-    save_jacc(fig5, "../2_Output/Figure5_KM_DDGrade.pdf", w = 6.9, h = 5.0)
+    save_jacc(fig5, "outputs/figures/Figure5_KM_DDGrade.pdf", w = 6.9, h = 5.0)
 
     # Log-rank test
     lr_test <- survdiff(Surv(follow_up_yrs, hf_composite) ~ dd_grade, data = surv_grade)
@@ -949,7 +965,7 @@ if (nrow(surv_df) >= 30 && sum(surv_df$hf_composite == 1, na.rm = TRUE) >= 5) {
       print()
 
     write.csv(tidy(cox_grade, exponentiate = TRUE, conf.int = TRUE),
-              "../2_Output/Table3_Cox_DDGrade.csv", row.names = FALSE)
+              "outputs/tables/Table3_Cox_DDGrade.csv", row.names = FALSE)
 
     # PH assumption check
     ph_check <- cox.zph(cox_grade)
@@ -970,7 +986,7 @@ if (nrow(surv_df) >= 30 && sum(surv_df$hf_composite == 1, na.rm = TRUE) >= 5) {
         flextable() %>% bold(part = "header") %>% theme_booktabs() %>% autofit() %>% print()
 
       write.csv(tidy(cox_z, exponentiate = TRUE, conf.int = TRUE),
-                "../2_Output/Table3_Cox_DDZscore.csv", row.names = FALSE)
+                "outputs/tables/Table3_Cox_DDZscore.csv", row.names = FALSE)
     }
   }
 } else {
@@ -1026,7 +1042,7 @@ table1_overall
 
 table1_overall %>%
   as_flex_table() %>%
-  save_as_docx(path = "../2_Output/Table1_Manuscript.docx")
+  save_as_docx(path = "outputs/tables/Table1_Manuscript.docx")
 ```
 
 ## Figure 1: Cohort Characteristics
@@ -1119,7 +1135,7 @@ fig1 <- (p_age | p_bmi | p_lbmi) /
   theme(plot.tag = element_text(face = "bold", size = 10))
 
 fig1
-save_jacc(fig1, "../2_Output/Figure1_Cohort_Characteristics.pdf", w = 6.9, h = 7.5)
+save_jacc(fig1, "outputs/figures/Figure1_Cohort_Characteristics.pdf", w = 6.9, h = 7.5)
 ```
 
 ## Figure 2: Longitudinal Analysis
@@ -1195,7 +1211,7 @@ fig2 <- (p_spaghetti | p_swimmer | p_corr) +
   theme(plot.tag = element_text(face = "bold", size = 11))
 
 fig2
-save_jacc(fig2, "../2_Output/Figure2_Longitudinal_Analysis.pdf", w = 6.9, h = 5.5)
+save_jacc(fig2, "outputs/figures/Figure2_Longitudinal_Analysis.pdf", w = 6.9, h = 5.5)
 ```
 
 # Supplemental Analyses
@@ -1240,7 +1256,7 @@ p_resid <- ggplot(resid_long, aes(x = label, y = resid)) +
   theme_jacc()
 
 p_resid
-save_jacc(p_resid, "../2_Output/FigureS_AgeResidualized_DiastolicIndices.pdf", w = 6.9, h = 4.5)
+save_jacc(p_resid, "outputs/figures/FigureS_AgeResidualized_DiastolicIndices.pdf", w = 6.9, h = 4.5)
 ```
 
 ## Export missing echo audit
@@ -1265,7 +1281,7 @@ if (nrow(missing_echo) > 0) {
     list(Missing_Echo_CPX = missing_echo,
          Summary = tibble(n_missing = nrow(missing_echo),
                           n_patients = n_distinct(missing_echo$ID))),
-    file = "../2_Output/Serial_CPX_missing_resting_echo.xlsx",
+    file = "outputs/audit/Serial_CPX_missing_resting_echo.xlsx",
     overwrite = TRUE
   )
   cat(sprintf("Exported %d CPX tests without echo linkage (%d patients)\n",
