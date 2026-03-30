@@ -4,6 +4,13 @@
 2_Output/Cycle/Cycle_Linked_Tests.xlsx
 2_Output/Serial_CPX_missing_resting_echo.xlsx
 outputs/audit/Serial_CPX_missing_resting_echo.xlsx
+Manuscript/
+Presentation/
+outputs/
+README_HCM.Diastology.qmd
+README_HCM.Diastology_files/
+_Scripts/*.html
+_Scripts/*.pdf
 
 # macOS
 .DS_Store
