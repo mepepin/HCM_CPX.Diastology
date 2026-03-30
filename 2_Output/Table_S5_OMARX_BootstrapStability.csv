@@ -1,0 +1,2 @@
+"outcome","variable","n_boot","retention_frequency","median_knot","iqr_low","iqr_high","pct_within_5_of_34"
+"VeVco2_slope","la_vol_index",200,0.595,34.81,33.21,35.94,1

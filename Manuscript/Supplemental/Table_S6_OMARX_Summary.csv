@@ -1,0 +1,4 @@
+"Outcome","N","Model performance","GCV cost/knot","Max knot budget","Retained OMARX thresholds vs ASE"
+"Peak VO₂ (% Predicted)",230,"R² 0.160 | Adj R² 0.137",2,10,"None retained"
+"VE/VCO₂ Slope",230,"R² 0.277 | Adj R² 0.247",2,10,"LAVI (mL/m²): 27.0 (ASE 34.0; -7.0)
+TR Vmax (cm/s): 251.1 (ASE 280.0; -28.9)"
