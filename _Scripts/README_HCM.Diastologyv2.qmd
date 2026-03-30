@@ -3996,6 +3996,44 @@ if (nrow(missing_echo) > 0) {
 }
 ```
 
+```{r reviewer_code_appendix, eval=is_gfm_output, results='asis', echo=FALSE}
+emit_code_details <- function(title, read_path, display_path, lang = "") {
+  if (!file.exists(read_path)) {
+    return(invisible(NULL))
+  }
+
+  file_lines <- readLines(read_path, warn = FALSE)
+
+  cat("<details>\n")
+  cat(sprintf("<summary>%s</summary>\n\n", title))
+  cat(sprintf("Path: `%s`\n\n", display_path))
+  cat(sprintf("````%s\n", lang))
+  cat(paste(file_lines, collapse = "\n"))
+  cat("\n````\n\n")
+  cat("</details>\n\n")
+}
+
+cat("## Reviewer Code\n\n")
+cat("The rendered results above are generated from the source files below so reviewers can inspect the exact analysis workflow used for this repository.\n\n")
+
+emit_code_details(
+  title = "Main Quarto analysis source",
+  read_path = "README_HCM.Diastologyv2.qmd",
+  display_path = "_Scripts/README_HCM.Diastologyv2.qmd",
+  lang = "qmd"
+)
+
+emit_code_details(
+  title = "OMARX notebook loader used by the Quarto analysis",
+  read_path = "python_vendor/omarx_from_notebook.py",
+  display_path = "_Scripts/python_vendor/omarx_from_notebook.py",
+  lang = "python"
+)
+
+cat("OMARX notebook source: [`_Scripts/omarx_v3.ipynb`](_Scripts/omarx_v3.ipynb)\n\n")
+cat("Additional analysis scripts and exported outputs are available in the repository folders [`_Scripts/`](_Scripts) and [`2_Output/`](2_Output).\n")
+```
+
 ```{r session_info, eval=!is_gfm_output}
 cat("\n\n---\n**Session Info:**\n")
 sessionInfo()

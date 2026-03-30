@@ -315,3 +315,4179 @@ echocardiographic parameters.
 ## Export missing echo audit
 
     Exported 164 CPX tests without echo linkage (88 patients)
+
+## Reviewer Code
+
+The rendered results above are generated from the source files below so
+reviewers can inspect the exact analysis workflow used for this
+repository.
+
+<details>
+
+<summary>
+
+Main Quarto analysis source
+</summary>
+
+Path: `_Scripts/README_HCM.Diastologyv2.qmd`
+
+```` qmd
+---
+title: "Modeling Left Ventricular Diastolic Dysfunction and Cardiopulmonary Fitness in HCM"
+author: "Mark E. Pepin, MD, PhD, MS, FESC"
+date: "2026-03-25"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+    code-tools: true
+    code-fold: true
+    self-contained: true
+    include-in-header:
+      text: |
+        <style>
+        main.content p,
+        main.content li,
+        main.content dd,
+        .quarto-title-block p,
+        .cell-output-display p,
+        figcaption,
+        caption {
+          text-align: justify;
+          text-justify: inter-word;
+        }
+        </style>
+editor:
+  render-on-save: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  fig.width = 6.9,
+  fig.height = 4.5,
+  dpi = 150,
+  dev = "png",
+  dev.args = list(type = "cairo")
+)
+
+# ── Package loading ──────────────────────────────────────────────────────────
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(patchwork)
+  library(splines)
+  library(lme4)
+  library(mgcv)
+  library(broom)
+  library(survival)
+  library(scales)
+  library(stringr)
+  library(openxlsx)
+  library(gtsummary)
+  library(flextable)
+  library(ggcorrplot)
+  library(viridis)
+  library(ggrepel)
+  library(gamlss)
+  library(reticulate)
+})
+
+Sys.setenv(MPLCONFIGDIR = tempfile("mplconfig_"))
+reticulate::use_python("/opt/anaconda3/bin/python3", required = TRUE)
+
+# ── JACC color palette (colorblind-safe) ─────────────────────────────────────
+jacc_cols <- c(
+  navy    = "#2C3E50",
+  red     = "#E74C3C",
+  blue    = "#3498DB",
+  green   = "#27AE60",
+  orange  = "#F39C12",
+  gray    = "#7F8C8D",
+  purple  = "#8E44AD"
+)
+
+# ── JACC publication theme ───────────────────────────────────────────────────
+theme_jacc <- function(base_size = 9) {
+  theme_classic(base_size = base_size, base_family = "Arial") +
+    theme(
+      plot.title       = element_text(face = "bold", size = base_size + 1, hjust = 0.5),
+      plot.subtitle    = element_text(size = base_size, hjust = 0.5, color = "grey40"),
+      axis.title       = element_text(face = "bold"),
+      axis.text        = element_text(color = "black"),
+      axis.line        = element_line(color = "black", linewidth = 0.4),
+      axis.ticks       = element_line(color = "black", linewidth = 0.3),
+      panel.grid       = element_blank(),
+      strip.background = element_rect(fill = "grey94", color = NA),
+      strip.text       = element_text(face = "bold", size = base_size),
+      legend.position  = "top",
+      legend.title     = element_blank(),
+      legend.text      = element_text(size = base_size - 1),
+      plot.margin      = margin(4, 8, 4, 4)
+    )
+}
+
+# ── Export helper ────────────────────────────────────────────────────────────
+save_jacc <- function(plot, path, w = 6.9, h = 4.5) {
+  ggsave(filename = path, plot = plot, device = cairo_pdf,
+         width = w, height = h, units = "in", dpi = 600)
+}
+
+show_and_save_jacc <- function(plot, path, w = 6.9, h = 4.5) {
+  print(plot)
+  save_jacc(plot, path, w = w, h = h)
+  invisible(plot)
+}
+
+is_gfm_output <- knitr::pandoc_to("gfm") || knitr::pandoc_to("commonmark")
+
+get_omar_results <- function() {
+  if (!reticulate::py_available(initialize = FALSE)) return(NULL)
+  if (!reticulate::py_has_attr(reticulate::py, "omar_results")) return(NULL)
+  reticulate::py_to_r(reticulate::py$omar_results)
+}
+
+get_omar_all_results <- function() {
+  if (!reticulate::py_available(initialize = FALSE)) return(NULL)
+  if (!reticulate::py_has_attr(reticulate::py, "omar_all_results")) return(NULL)
+  reticulate::py_to_r(reticulate::py$omar_all_results)
+}
+
+# ── Age-residualization helper (single definition) ───────────────────────────
+residualize_on_age <- function(df, idx) {
+  df <- df %>% mutate(.row_id = row_number())
+  dsub <- df %>% filter(!is.na(.data[[idx]]), !is.na(age))
+  if (nrow(dsub) < 10) {
+    df[[paste0(idx, "_resid")]] <- NA_real_
+    return(df %>% select(-.row_id))
+  }
+  fit <- lm(as.formula(paste0(idx, " ~ ns(age, df = 3)")), data = dsub)
+  dsub$.resid <- resid(fit)
+  df <- df %>% left_join(dsub %>% select(.row_id, .resid), by = ".row_id")
+  df[[paste0(idx, "_resid")]] <- df$.resid
+  df %>% select(-.row_id, -.resid)
+}
+
+# ── Output directory ─────────────────────────────────────────────────────────
+dir.create("../2_Output", recursive = TRUE, showWarnings = FALSE)
+```
+
+# Data Import and Cohort Assembly
+
+## Import and clean CPX data
+
+The initial phase imports raw Cardiopulmonary Exercise Testing (CPET) data, assigns a stable patient identifier (ID) per MRN, restricts to HCM with adequate effort (peak RER $\geq 1.0$), and derives biometric indices (BSA, BMI, LBMI). Baseline and cross-sectional analyses use all eligible CPET studies; longitudinal analyses later restrict to patients with repeated aligned testing.
+
+```{r cpx_cleaning}
+CPX <- read.xlsx("../1_Input/CPX_input.xlsx", sheet = "CPX", detectDates = TRUE)
+
+CPX_with_id <- CPX %>%
+  group_by(MRN) %>%
+  mutate(ID = cur_group_id()) %>%
+  ungroup()
+
+CPX_hcm_effort <- CPX_with_id %>%
+  filter(ID != "1380") %>%
+  filter(MCl3 == "HCM", pk.RER >= 1.0)
+
+# Cohort flow tracking
+filter_flow <- tibble(
+  stage      = c("Initial CPX import", "Assigned stable patient ID",
+                 "HCM diagnosis + RER >= 1.0"),
+  n_tests    = c(nrow(CPX), nrow(CPX_with_id), nrow(CPX_hcm_effort)),
+  n_patients = c(n_distinct(CPX$MRN), n_distinct(CPX_with_id$ID),
+                 n_distinct(CPX_hcm_effort$ID))
+)
+
+# Biometric calculations
+CPX_clean <- CPX_hcm_effort %>%
+  mutate(
+    BSA  = sqrt((`height.(cm)` * `Weight.(kg)`) / 3600),
+    LBMI = LBM.NHANES.no.race / (`height.(cm)` / 100)^2,
+    BMI  = `Weight.(kg)` / ((`height.(cm)` / 100)^2)
+  ) %>%
+  group_by(ID) %>%
+  arrange(cpx_test_date, .by_group = TRUE) %>%
+  mutate(days_from_baseline = as.numeric(cpx_test_date - first(cpx_test_date))) %>%
+  ungroup()
+
+CPX_clean <- CPX_clean %>%
+  select(
+    ID, MRN, cpx_test_date, age, Sex = `Sex:.M(0)/F(1)`, BMI, BSA,
+    LBM = LBM.NHANES.no.race, LBMI, HCM_Phenotype = MCl4,
+    CPX.sequential, days_from_baseline, pk.RER,
+    VO2_FRIEND_PP   = `FRIEND1.%.predicted.VO2`,
+    VO2_WASSERMAN_PP = `Wasserman.%predicted.VO2.(2005)`,
+    VO2_FRIEND2_PP  = `FRIEND2.%predicted.VO2`,
+    HRmax_PP = `%predicted.HR.FRIEND`,
+    HRR = `HR.recovery.(1min)`,
+    VeVco2_slope = `ve/vco2.slope`
+  ) %>%
+  filter(
+    (is.na(VO2_FRIEND2_PP) | (VO2_FRIEND2_PP >= 0 & VO2_FRIEND2_PP <= 200)) &
+    (is.na(VO2_FRIEND_PP)  | (VO2_FRIEND_PP >= 0 & VO2_FRIEND_PP <= 200))
+  )
+
+cat(sprintf("CPX tests (HCM, adequate effort): %d tests, %d patients\n",
+            nrow(CPX_clean), n_distinct(CPX_clean$ID)))
+```
+
+## Comorbidity exclusions
+
+Patients with documented CAD, COPD, or interstitial lung disease are excluded so that exercise limitations are attributable to HCM-specific pathology.
+
+```{r comorbidities}
+Comorbidities_table <- read.xlsx("../1_Input/CPX_input.xlsx",
+                                  sheet = "co-morbidities", detectDates = TRUE)
+
+Comorbidities_to_filter <- Comorbidities_table %>%
+  select(MRN, cad_pre_test, copd_pre_test, interstitial_lung_dz_pre_test) %>%
+  filter(
+    (cad_pre_test != 1 | is.na(cad_pre_test)) &
+    (copd_pre_test != 1 | is.na(copd_pre_test)) &
+    (interstitial_lung_dz_pre_test != 1 | is.na(interstitial_lung_dz_pre_test))
+  )
+
+CPX_comorbidity_filtered <- CPX_clean %>%
+  filter(MRN %in% Comorbidities_to_filter$MRN)
+
+filter_flow <- bind_rows(filter_flow, tibble(
+  stage      = "Excluded CAD/COPD/ILD",
+  n_tests    = nrow(CPX_comorbidity_filtered),
+  n_patients = n_distinct(CPX_comorbidity_filtered$ID)
+))
+```
+
+## Merge echocardiographic data
+
+Each CPET is aligned with the closest resting echocardiogram within 1 week on either side of the CPX date.
+
+```{r echo_merge}
+echo_raw <- read.xlsx("../1_Input/mark_extract_20260316.xlsx", sheet = 1, detectDates = TRUE)
+
+echo_vars_core <- c(
+  "e_e_ave", "e_e_lat", "e_e_med", "mv_a_dur", "mv_a_point", "mv_dec_time",
+  "mv_e_a", "tr_max_vel", "la_vol_index", "med_peak_e_vel", "lat_peak_e_vel",
+  "ef_modsp4", "la_vol", "pulm_dias_vel", "pulm_sys_vel", "max_pg", "ivsd"
+)
+
+echo_all <- echo_raw %>%
+  mutate(MRN = as.character(mrn), echo_date = as.Date(echo_date)) %>%
+  select(MRN, echo_date, all_of(echo_vars_core)) %>%
+  mutate(across(all_of(echo_vars_core), ~ as.numeric(as.character(.))))
+
+# Closest echo within +/- 1 week of CPX
+align_window_days <- 7
+
+cpx_aligned <- CPX_comorbidity_filtered %>%
+  mutate(MRN = as.character(MRN), cpx_test_date = as.Date(cpx_test_date))
+
+cpx_echo <- cpx_aligned %>%
+  left_join(echo_all, by = "MRN", relationship = "many-to-many") %>%
+  mutate(
+    delta_days = as.numeric(cpx_test_date - echo_date),
+    abs_delta_days = abs(delta_days)
+  ) %>%
+  filter(!is.na(delta_days), abs_delta_days <= align_window_days) %>%
+  group_by(ID, CPX.sequential, cpx_test_date) %>%
+  slice_min(order_by = abs_delta_days, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# Prepare derived variables
+cpx_echo <- cpx_echo %>%
+  mutate(
+    E_vel = coalesce(med_peak_e_vel, lat_peak_e_vel),
+    e_prime_ave = ifelse(!is.na(med_peak_e_vel) & !is.na(lat_peak_e_vel),
+                         (med_peak_e_vel + lat_peak_e_vel) / 2,
+                         coalesce(med_peak_e_vel, lat_peak_e_vel)),
+    lvot_max_gradient = max_pg,
+    lv_septal_thickness = ivsd,
+    Sex   = factor(Sex, levels = c(0, 1), labels = c("Male", "Female"))
+  )
+
+# Update filter flow
+filter_flow <- bind_rows(filter_flow, tibble(
+  stage      = "Echo aligned (within +/- 7d)",
+  n_tests    = nrow(cpx_echo),
+  n_patients = n_distinct(cpx_echo$ID)
+))
+
+# Baseline and longitudinal cohorts
+num_vars <- c("VO2_FRIEND2_PP", "VO2_FRIEND_PP", "VO2_WASSERMAN_PP", "VeVco2_slope",
+              "pk.RER", "age", "BMI", "LBMI", "e_e_ave", "la_vol_index", "tr_max_vel",
+              "med_peak_e_vel", "lat_peak_e_vel", "ef_modsp4", "lvot_max_gradient",
+              "lv_septal_thickness",
+              "mv_e_a", "mv_dec_time", "E_vel", "e_prime_ave")
+
+baseline_df <- cpx_echo %>%
+  group_by(ID) %>% arrange(days_from_baseline) %>% slice(1) %>% ungroup() %>%
+  mutate(across(any_of(num_vars), ~ as.numeric(as.character(.))))
+
+longitudinal_ids <- cpx_echo %>%
+  count(ID, name = "num_aligned_tests") %>%
+  filter(num_aligned_tests > 1)
+
+longitudinal_cpx <- cpx_echo %>%
+  semi_join(longitudinal_ids, by = "ID")
+
+long_df <- longitudinal_cpx %>%
+  filter(!is.na(VO2_FRIEND2_PP), !is.na(days_from_baseline)) %>%
+  mutate(across(any_of(num_vars), ~ as.numeric(as.character(.))),
+         time_yrs = days_from_baseline / 365.25)
+
+cat(sprintf(
+  "Baseline cohort: %d patients\nLongitudinal repeated-test cohort: %d observations across %d patients\n",
+  nrow(baseline_df), nrow(long_df), n_distinct(long_df$ID)
+))
+```
+
+## Import clinical outcomes
+
+```{r outcomes_import}
+outcomes_raw <- read.xlsx("../1_Input/CPX_input.xlsx", sheet = "Outcomes_2025", detectDates = TRUE)
+
+coerce_excel_date <- function(x) {
+  if (inherits(x, "Date")) return(as.Date(x))
+  x_num <- suppressWarnings(as.numeric(x))
+  as.Date(openxlsx::convertToDate(x_num))
+}
+
+outcomes <- outcomes_raw %>%
+  mutate(MRN = as.character(MRN)) %>%
+  select(MRN,
+         death, death_date_clean,
+         post_acute_heart_failure, post_acute_heart_failure_date, post_acute_heart_failure_yrs,
+         post_chronic_heart_failure, post_chronic_heart_failure_date, post_chronic_heart_failure_yrs,
+         post_heart_transplant, post_heart_transplant_date, post_heart_transplant_yrs,
+         post_afib_flut, post_afib_flut_date, post_afib_flut_yrs,
+         last_enc_date) %>%
+  mutate(across(c(death, post_acute_heart_failure, post_chronic_heart_failure,
+                  post_heart_transplant, post_afib_flut), ~ as.numeric(as.character(.)))) %>%
+  mutate(across(c(post_acute_heart_failure_date, post_chronic_heart_failure_date,
+                  post_heart_transplant_date, post_afib_flut_date,
+                  death_date_clean, last_enc_date), coerce_excel_date)) %>%
+  mutate(across(c(post_acute_heart_failure_yrs, post_chronic_heart_failure_yrs,
+                  post_heart_transplant_yrs, post_afib_flut_yrs), ~ as.numeric(as.character(.))))
+
+# Composite HF endpoint: acute HF, chronic HF, transplant, or death
+outcomes <- outcomes %>%
+  mutate(
+    hf_composite = pmax(
+      coalesce(post_acute_heart_failure, 0),
+      coalesce(post_chronic_heart_failure, 0),
+      coalesce(post_heart_transplant, 0),
+      coalesce(death, 0),
+      na.rm = TRUE
+    ),
+    hf_composite_yrs = pmin(
+      coalesce(post_acute_heart_failure_yrs, Inf),
+      coalesce(post_chronic_heart_failure_yrs, Inf),
+      coalesce(post_heart_transplant_yrs, Inf),
+      na.rm = TRUE
+    ),
+    hf_composite_yrs = ifelse(is.infinite(hf_composite_yrs), NA_real_, hf_composite_yrs),
+    hf_composite_date_num = pmin(
+      coalesce(as.numeric(post_acute_heart_failure_date), Inf),
+      coalesce(as.numeric(post_chronic_heart_failure_date), Inf),
+      coalesce(as.numeric(post_heart_transplant_date), Inf),
+      coalesce(as.numeric(death_date_clean), Inf),
+      na.rm = TRUE
+    ),
+    hf_composite_date_num = ifelse(is.infinite(hf_composite_date_num), NA_real_, hf_composite_date_num)
+  )
+
+# Deduplicate outcomes to one row per patient before merging
+# (Outcomes_2025 sheet has one row per CPX test, not per patient)
+outcomes_dedup <- outcomes %>%
+  select(MRN, hf_composite, hf_composite_yrs, hf_composite_date_num,
+         post_afib_flut, post_afib_flut_yrs,
+         death, last_enc_date) %>%
+  group_by(MRN) %>%
+  summarise(
+    hf_composite     = max(hf_composite, na.rm = TRUE),
+    hf_composite_yrs = min(hf_composite_yrs, na.rm = TRUE),
+    hf_composite_date_num = min(hf_composite_date_num, na.rm = TRUE),
+    post_afib_flut   = max(post_afib_flut, na.rm = TRUE),
+    post_afib_flut_yrs = min(post_afib_flut_yrs, na.rm = TRUE),
+    death            = max(death, na.rm = TRUE),
+    last_enc_date    = max(last_enc_date, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Fix Inf/-Inf from summarise when all values are NA
+    across(where(is.numeric), ~ ifelse(is.infinite(.), NA_real_, .)),
+    last_enc_date = as.Date(last_enc_date)
+  )
+
+n_pre_join <- nrow(baseline_df)
+baseline_df <- baseline_df %>%
+  left_join(outcomes_dedup, by = "MRN")
+stopifnot(nrow(baseline_df) == n_pre_join)  # Guard against join inflation
+
+cat(sprintf("Patients with outcome data: %d\nComposite HF events: %d\n",
+            sum(!is.na(baseline_df$hf_composite)),
+            sum(baseline_df$hf_composite == 1, na.rm = TRUE)))
+```
+
+## Cohort flow diagram
+
+```{r flow_diagram, fig.width=6.9, fig.height=3.8, results='asis'}
+filter_flow <- filter_flow %>%
+  mutate(
+    stage = factor(stage, levels = stage),
+    removed = lag(n_tests, default = first(n_tests)) - n_tests
+  )
+
+p_flow <- filter_flow %>%
+  mutate(stage = factor(stage, levels = rev(levels(stage)))) %>%
+  ggplot(aes(y = stage, x = n_tests)) +
+  geom_col(fill = jacc_cols["navy"], width = 0.65, color = "black", linewidth = 0.2) +
+  geom_text(aes(label = paste0(comma(n_tests), " tests | ", comma(n_patients), " pts")),
+            hjust = 0, nudge_x = 15, size = 2.8, color = "black") +
+  scale_x_continuous(labels = comma, expand = expansion(mult = c(0, 0.25))) +
+  labs(title = "Cohort Assembly", x = "CPX Tests", y = NULL) +
+  theme_jacc()
+
+show_and_save_jacc(p_flow, "../2_Output/Cohort_Filtering_Workflow.pdf", w = 6.9, h = 3.8)
+```
+
+**Legend.** Cohort assembly workflow for the analytic dataset. Horizontal bars show the number of CPX studies retained at each sequential filtering step, with labels indicating both the number of tests and the number of unique patients remaining after each restriction. The final bar represents the CPX studies successfully aligned to a resting echocardiogram within the prespecified time window.
+
+# ASE 2025 HCM Diastolic Assessment (Primary Parameter Combination Phenotypes)
+
+To avoid collapsing HCM diastolic physiology into a binary label, we categorized baseline studies according to the observed combination of the 3 HCM-relevant primary parameters available in this dataset: average E/e$'$ >14, left atrial volume index (LAVI) >34 mL/m$^2$, and peak tricuspid regurgitation velocity (TR V$_{max}$) >2.8 m/s. These variables were selected because they correspond to the principal HCM-related markers highlighted in the 2025 American Society of Echocardiography update for special populations.
+
+Combination phenotypes were assigned whenever at least 1 of the 3 primary parameters was available at baseline. Each patient was mapped to 1 of 8 mutually exclusive profiles reflecting the observed pattern of abnormal findings: none abnormal, isolated E/e$'$ abnormality, isolated LAVI abnormality, isolated TR V$_{max}$ abnormality, each possible 2-parameter combination, or all 3 parameters abnormal. Thus, patients with incomplete primary-parameter data were retained in these descriptive analyses if at least 1 observed parameter was available; the "none abnormal" category denotes that no observed primary parameter was abnormal, not that all 3 parameters were measured and normal.
+
+```{r ase_grading, results='asis'}
+baseline_df <- baseline_df %>%
+  mutate(
+    pv_sd_ratio = ifelse(
+      !is.na(pulm_sys_vel) & !is.na(pulm_dias_vel) & pulm_dias_vel > 0,
+      pulm_sys_vel / pulm_dias_vel,
+      NA_real_
+    ),
+    # Note: tr_max_vel is stored in cm/s; ASE cutoff is >2.8 m/s = >280 cm/s
+    abn_ee   = !is.na(e_e_ave)       & e_e_ave > 14,
+    abn_lavi = !is.na(la_vol_index)  & la_vol_index > 34,
+    abn_trv  = !is.na(tr_max_vel)    & tr_max_vel > 280,
+    n_primary_available = (!is.na(e_e_ave)) + (!is.na(la_vol_index)) + (!is.na(tr_max_vel)),
+    n_primary_abnormal  = abn_ee + abn_lavi + abn_trv,
+    hcm_combo_code = case_when(
+      n_primary_available >= 1 ~ paste0(as.integer(abn_ee), as.integer(abn_lavi), as.integer(abn_trv)),
+      TRUE ~ NA_character_
+    ),
+    hcm_combo_class = case_when(
+      hcm_combo_code == "000" ~ "None abnormal",
+      hcm_combo_code == "100" ~ "E/e' only",
+      hcm_combo_code == "010" ~ "LAVI only",
+      hcm_combo_code == "001" ~ "TR Vmax only",
+      hcm_combo_code == "110" ~ "E/e' + LAVI",
+      hcm_combo_code == "101" ~ "E/e' + TR Vmax",
+      hcm_combo_code == "011" ~ "LAVI + TR Vmax",
+      hcm_combo_code == "111" ~ "All 3 abnormal",
+      TRUE ~ NA_character_
+    ),
+    hcm_combo_class = factor(
+      hcm_combo_class,
+      levels = c(
+        "None abnormal",
+        "E/e' only",
+        "LAVI only",
+        "TR Vmax only",
+        "E/e' + LAVI",
+        "E/e' + TR Vmax",
+        "LAVI + TR Vmax",
+        "All 3 abnormal"
+      )
+    ),
+    hcm_combo_n_abnormal = ifelse(n_primary_available >= 1, n_primary_abnormal, NA_integer_),
+    hcm_combo_abnormal_group = factor(
+      hcm_combo_n_abnormal,
+      levels = 0:3,
+      labels = c("0", "1", "2", "3")
+    ),
+    restrictive_pattern = !is.na(mv_e_a) & mv_e_a >= 2,
+    short_dt            = !is.na(mv_dec_time) & mv_dec_time < 150,
+    low_pv_sd           = !is.na(pv_sd_ratio) & pv_sd_ratio < 1,
+    n_supportive_elevated = restrictive_pattern + short_dt + low_pv_sd,
+    elevated_by_primary = n_primary_abnormal >= 2,
+    elevated_by_mixed = n_primary_abnormal == 1 & n_supportive_elevated >= 1,
+    elevated_by_supportive_only = n_primary_available <= 1 & n_supportive_elevated >= 2,
+    fp_class = case_when(
+      elevated_by_primary         ~ "Elevated",
+      elevated_by_mixed           ~ "Elevated",
+      elevated_by_supportive_only ~ "Elevated",
+      TRUE                        ~ "Not Elevated"
+    ),
+    fp_class = factor(fp_class, levels = c("Not Elevated", "Elevated"))
+  )
+
+long_df <- long_df %>%
+  left_join(
+    baseline_df %>% select(ID, fp_class),
+    by = "ID"
+  )
+
+cat("**Primary HCM Parameter Availability:**\n\n")
+cat(sprintf("  3 indicators available: %d (%0.1f%%)\n",
+            sum(baseline_df$n_primary_available == 3, na.rm = TRUE),
+            100 * mean(baseline_df$n_primary_available == 3, na.rm = TRUE)))
+cat(sprintf("  2 indicators available: %d (%0.1f%%)\n",
+            sum(baseline_df$n_primary_available == 2, na.rm = TRUE),
+            100 * mean(baseline_df$n_primary_available == 2, na.rm = TRUE)))
+cat(sprintf("  0-1 indicators available: %d (%0.1f%%)\n\n",
+            sum(baseline_df$n_primary_available <= 1, na.rm = TRUE),
+            100 * mean(baseline_df$n_primary_available <= 1, na.rm = TRUE)))
+
+cat("**Primary Parameter Combination Phenotypes (Patients With >=1 Primary Parameter):**\n\n")
+print(table(baseline_df$hcm_combo_class, useNA = "no"))
+
+# Individual criterion prevalence
+cat("\n**Individual Criterion Prevalence:**\n\n")
+cat(sprintf("  E/e' >14:     %d / %d (%0.1f%%)\n",
+            sum(baseline_df$abn_ee, na.rm = TRUE),
+            sum(!is.na(baseline_df$e_e_ave)),
+            100 * mean(baseline_df$abn_ee[!is.na(baseline_df$e_e_ave)], na.rm = TRUE)))
+cat(sprintf("  LAVI >34:     %d / %d (%0.1f%%)\n",
+            sum(baseline_df$abn_lavi, na.rm = TRUE),
+            sum(!is.na(baseline_df$la_vol_index)),
+            100 * mean(baseline_df$abn_lavi[!is.na(baseline_df$la_vol_index)], na.rm = TRUE)))
+cat(sprintf("  TR Vmax >2.8: %d / %d (%0.1f%%)\n",
+            sum(baseline_df$abn_trv, na.rm = TRUE),
+            sum(!is.na(baseline_df$tr_max_vel)),
+            100 * mean(baseline_df$abn_trv[!is.na(baseline_df$tr_max_vel)], na.rm = TRUE)))
+```
+
+```{r ase_figure, fig.width=6.9, fig.height=5.0, results='asis'}
+# ── Panels A, C, D: HCM combination phenotype profiles ───────────────────────
+df_combo <- baseline_df %>% filter(!is.na(hcm_combo_class))
+combo_palette <- c(
+  "0" = "#C4CBD3",
+  "1" = "#8FB3C9",
+  "2" = "#D7BE86",
+  "3" = "#C88B8B"
+)
+
+combo_levels <- levels(baseline_df$hcm_combo_class)
+combo_signature <- tibble(
+  hcm_combo_code = c("000", "100", "010", "001", "110", "101", "011", "111"),
+  hcm_combo_class = factor(
+    c("None abnormal", "E/e' only", "LAVI only", "TR Vmax only",
+      "E/e' + LAVI", "E/e' + TR Vmax", "LAVI + TR Vmax", "All 3 abnormal"),
+    levels = combo_levels
+  )
+) %>%
+  mutate(
+    hcm_combo_abnormal_group = factor(
+      stringr::str_count(hcm_combo_code, "1"),
+      levels = 0:3,
+      labels = names(combo_palette)
+    ),
+    `E/e'`   = ifelse(substr(hcm_combo_code, 1, 1) == "1", "+", "-"),
+    LAVI     = ifelse(substr(hcm_combo_code, 2, 2) == "1", "+", "-"),
+    `TR Vmax` = ifelse(substr(hcm_combo_code, 3, 3) == "1", "+", "-"),
+    x_id = row_number()
+  )
+
+stopifnot(all(
+  combo_signature$hcm_combo_abnormal_group ==
+    factor(stringr::str_count(combo_signature$hcm_combo_code, "1"),
+           levels = 0:3, labels = names(combo_palette))
+))
+
+signature_long <- combo_signature %>%
+  pivot_longer(cols = c(`E/e'`, LAVI, `TR Vmax`),
+               names_to = "Parameter", values_to = "Status") %>%
+  mutate(
+    Parameter = factor(Parameter, levels = c("TR Vmax", "LAVI", "E/e'")),
+    text_col = ifelse(Status == "+", "white", "black")
+  )
+
+param_levels <- c("TR Vmax", "LAVI", "E/e'")
+x_limits <- c(0.5, nrow(combo_signature) + 0.5)
+
+intersection_counts <- combo_signature %>%
+  select(x_id, hcm_combo_class, hcm_combo_abnormal_group) %>%
+  left_join(df_combo %>% count(hcm_combo_class), by = "hcm_combo_class") %>%
+  mutate(n = coalesce(n, 0L))
+
+upset_matrix <- combo_signature %>%
+  pivot_longer(cols = c(`E/e'`, LAVI, `TR Vmax`),
+               names_to = "Parameter", values_to = "Status") %>%
+  mutate(
+    Parameter = factor(Parameter, levels = param_levels),
+    param_id = match(as.character(Parameter), param_levels),
+    dot_fill = ifelse(Status == "+", "active", "inactive")
+  )
+
+upset_connectors <- upset_matrix %>%
+  filter(Status == "+") %>%
+  group_by(x_id, hcm_combo_class, hcm_combo_abnormal_group) %>%
+  summarize(
+    ymin = min(param_id),
+    ymax = max(param_id),
+    n_active = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n_active >= 2)
+
+p_upset_top <- intersection_counts %>%
+  ggplot(aes(x = x_id, y = n, fill = hcm_combo_abnormal_group)) +
+  geom_col(width = 0.72, color = "black", linewidth = 0.2) +
+  geom_text(aes(label = n), vjust = -0.25, size = 3.1) +
+  scale_fill_manual(values = combo_palette, drop = FALSE) +
+  scale_x_continuous(limits = x_limits, breaks = combo_signature$x_id, labels = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.14))) +
+  labs(
+    title = "HCM Primary Parameter UpSet Plot",
+    subtitle = sprintf("Baseline cohort with >=1 primary parameter: n = %d", nrow(df_combo)),
+    x = NULL,
+    y = "Patients",
+    tag = "(A)"
+  ) +
+  theme_jacc() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    plot.tag = element_text(face = "bold", size = 11),
+    plot.margin = margin(4, 6, 8, 4)
+  )
+
+p_upset_matrix <- ggplot(upset_matrix, aes(x = x_id, y = param_id)) +
+  geom_segment(
+    data = upset_connectors,
+    aes(x = x_id, xend = x_id, y = ymin, yend = ymax),
+    inherit.aes = FALSE,
+    linewidth = 0.55,
+    color = "black"
+  ) +
+  geom_point(aes(color = dot_fill), shape = 16, size = 2.8) +
+  scale_color_manual(values = c(active = "black", inactive = "grey75"), drop = FALSE) +
+  scale_x_continuous(limits = x_limits, breaks = combo_signature$x_id, labels = NULL) +
+  scale_y_continuous(
+    breaks = seq_along(param_levels),
+    labels = param_levels,
+    expand = expansion(mult = c(0.15, 0.15))
+  ) +
+  labs(x = NULL, y = NULL) +
+  theme_jacc() +
+  theme(
+    legend.position = "none",
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = margin(6, 6, 4, 4)
+  )
+
+p_bar <- wrap_elements(
+  full = patchwork::patchworkGrob(
+    p_upset_top / p_upset_matrix + plot_layout(heights = c(4.0, 1.55))
+  )
+)
+
+# ── Panel B: Peak VO2 by combination phenotype ───────────────────────────────
+p_box_top <- df_combo %>%
+  filter(!is.na(VO2_FRIEND2_PP)) %>%
+  ggplot(aes(x = hcm_combo_class, y = VO2_FRIEND2_PP, fill = hcm_combo_abnormal_group)) +
+  geom_boxplot(width = 0.5, outlier.size = 0.8, linewidth = 0.3) +
+  geom_jitter(width = 0.15, alpha = 0.15, size = 0.8) +
+  scale_fill_manual(values = combo_palette, drop = FALSE) +
+  scale_x_discrete(drop = FALSE) +
+  labs(title = bquote(bold("Peak" ~ VO[2] ~ "by Combination Phenotype")),
+       subtitle = paste0("Kruskal-Wallis p = ",
+                         format.pval(kruskal.test(VO2_FRIEND2_PP ~ hcm_combo_class, data = df_combo)$p.value, digits = 2)),
+       x = NULL,
+       y = bquote("Peak" ~ VO[2] ~ "(% Predicted, FRIEND 2.0)"),
+       tag = "(B)") +
+  theme_jacc() + theme(legend.position = "none",
+                       axis.text.x = element_blank(),
+                       axis.ticks.x = element_blank(),
+                       plot.margin = margin(4, 6, 0, 4))
+
+p_box_sig <- signature_long %>%
+  ggplot(aes(x = hcm_combo_class, y = Parameter, fill = hcm_combo_abnormal_group)) +
+  geom_tile(color = "white", linewidth = 0.6) +
+  geom_text(aes(label = Status, color = text_col), size = 3.8, fontface = "bold") +
+  scale_fill_manual(values = combo_palette, drop = FALSE) +
+  scale_color_identity() +
+  scale_x_discrete(drop = FALSE) +
+  labs(x = NULL, y = NULL) +
+  theme_jacc() + theme(
+    legend.position = "none",
+    panel.border = element_blank(),
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x = element_blank(),
+    plot.margin = margin(0, 6, 4, 4)
+  )
+
+p_box <- p_box_top / p_box_sig + plot_layout(heights = c(4.2, 1.35))
+
+# ── Panel C: VE/VCO2 by combination phenotype ────────────────────────────────
+p_vevco2_top <- df_combo %>%
+  filter(!is.na(VeVco2_slope)) %>%
+  ggplot(aes(x = hcm_combo_class, y = VeVco2_slope, fill = hcm_combo_abnormal_group)) +
+  geom_boxplot(width = 0.5, outlier.size = 0.8, linewidth = 0.3) +
+  geom_jitter(width = 0.15, alpha = 0.15, size = 0.8) +
+  scale_fill_manual(values = combo_palette, drop = FALSE) +
+  scale_x_discrete(drop = FALSE) +
+  labs(title = bquote(bold(VE/VCO[2] ~ "Slope by Combination Phenotype")),
+       subtitle = paste0("Kruskal-Wallis p = ",
+                         format.pval(kruskal.test(VeVco2_slope ~ hcm_combo_class, data = df_combo)$p.value, digits = 2)),
+       x = NULL,
+       y = bquote(VE/VCO[2] ~ "Slope"),
+       tag = "(C)") +
+  theme_jacc() + theme(legend.position = "none",
+                       axis.text.x = element_blank(),
+                       axis.ticks.x = element_blank(),
+                       plot.margin = margin(4, 6, 0, 4))
+
+p_vevco2_sig <- signature_long %>%
+  ggplot(aes(x = hcm_combo_class, y = Parameter, fill = hcm_combo_abnormal_group)) +
+  geom_tile(color = "white", linewidth = 0.6) +
+  geom_text(aes(label = Status, color = text_col), size = 3.8, fontface = "bold") +
+  scale_fill_manual(values = combo_palette, drop = FALSE) +
+  scale_color_identity() +
+  scale_x_discrete(drop = FALSE) +
+  labs(x = NULL, y = NULL) +
+  theme_jacc() + theme(
+    legend.position = "none",
+    panel.border = element_blank(),
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    plot.margin = margin(0, 6, 4, 4)
+  )
+
+p_vevco2 <- p_vevco2_top / p_vevco2_sig + plot_layout(heights = c(4.2, 1.35))
+
+fig_ase <- p_bar / (p_box | p_vevco2) &
+  theme(plot.tag = element_text(face = "bold", size = 11))
+
+show_and_save_jacc(fig_ase, "../2_Output/Figure2_ASE2025_FillingPressure.pdf", w = 6.9, h = 5.4)
+```
+
+**Figure 2. Baseline HCM Primary-Parameter Phenotypes and Cardiopulmonary Performance.** **(A)** Frequency of each observed combination of abnormal E/e$'$, LAVI, and TR V$_{max}$, with black dots indicating parameters contributing to a given phenotype and gray dots indicating parameters not present in that combination. **(B)** Peak VO$_2$ (FRIEND 2.0 % predicted) across phenotypes. **(C)** VE/VCO$_2$ slope across the same phenotypes. Boxplots display the median and interquartile range, and jittered points represent individual patients. Bar and strip colors denote the number of abnormal primary parameters within each phenotype. Abbreviations: HCM = hypertrophic cardiomyopathy; LAVI = left atrial volume index; TR V$_{max}$ = peak tricuspid regurgitation velocity; VE/VCO$_2$ = ventilatory efficiency slope; VO$_2$ = oxygen consumption.
+
+```{r ase_stratified_table, results='asis'}
+tbl_ase <- baseline_df %>%
+  filter(!is.na(hcm_combo_class)) %>%
+  mutate(
+    hcm_primary_binary = factor(
+      ifelse(hcm_combo_n_abnormal == 0, "Normal", "Abnormal"),
+      levels = c("Normal", "Abnormal")
+    )
+  ) %>%
+  select(hcm_primary_binary, age, Sex, BMI, LBMI, HCM_Phenotype,
+         VO2_FRIEND2_PP, VO2_WASSERMAN_PP, VeVco2_slope, HRR,
+         lvot_max_gradient, lv_septal_thickness,
+         e_prime_ave, med_peak_e_vel, lat_peak_e_vel,
+         e_e_ave, la_vol_index, tr_max_vel, mv_e_a, mv_dec_time, ef_modsp4) %>%
+  tbl_summary(
+    by = hcm_primary_binary,
+    label = list(
+      age              ~ "Age, years",
+      Sex              ~ "Sex",
+      BMI              ~ "BMI, kg/m\u00B2",
+      LBMI             ~ "LBMI, kg/m\u00B2",
+      HCM_Phenotype    ~ "HCM Phenotype",
+      VO2_FRIEND2_PP   ~ "Peak VO\u2082 (FRIEND 2.0 %pred)",
+      VO2_WASSERMAN_PP ~ "Peak VO\u2082 (Wasserman %pred)",
+      VeVco2_slope     ~ "VE/VCO\u2082 Slope",
+      HRR              ~ "HR Recovery (1 min)",
+      lvot_max_gradient ~ "Max LVOT Gradient, mm Hg",
+      lv_septal_thickness ~ "LV Septal Thickness, cm",
+      e_prime_ave      ~ "Average e', cm/s",
+      med_peak_e_vel   ~ "Septal e', cm/s",
+      lat_peak_e_vel   ~ "Lateral e', cm/s",
+      e_e_ave          ~ "E/e' (average)",
+      la_vol_index     ~ "LAVI, mL/m\u00B2",
+      tr_max_vel       ~ "TR Vmax, cm/s",
+      mv_e_a           ~ "E/A Ratio",
+      mv_dec_time      ~ "MV Deceleration Time, ms",
+      ef_modsp4        ~ "LVEF, %"
+    ),
+    statistic = list(all_continuous() ~ "{mean} ({sd})",
+                     all_categorical() ~ "{n} ({p}%)"),
+    digits = all_continuous() ~ 1,
+    missing = "no"
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous() ~ "kruskal.test",
+      all_categorical() ~ "fisher.test"
+    ),
+    test.args = all_tests("fisher.test") ~ list(simulate.p.value = TRUE)
+  ) %>%
+  bold_labels() %>%
+  modify_caption("**Table: Patient Characteristics by Any Abnormal HCM Primary Parameter**")
+
+if (!is_gfm_output) {
+  tbl_ase
+}
+
+tbl_ase %>% as_flex_table() %>%
+  save_as_docx(path = "../2_Output/Table_ASE2025_FillingPressure.docx")
+```
+
+# Cross-Sectional Nonlinear Analysis
+
+Cross-sectional nonlinear modeling is focused on the 3 HCM-relevant ASE 2025 primary parameters available in this dataset: average E/e$'$, LAVI, and TR V$_{max}$. For each parameter, we fit restricted cubic spline models adjusted for age, sex, and lean body mass index, then display predicted performance across the observed range with the ASE 2025 threshold overlaid. We next repeat the same clinical framing using OMAR, allowing data-driven thresholds to be compared directly with the ASE reference cutoffs.
+
+```{r cross_sectional_helpers, include=FALSE}
+diastolic_indices <- c(
+ "e_e_ave", "e_e_lat", "e_e_med", "mv_a_dur", "mv_a_point", "mv_dec_time",
+ "mv_e_a", "tr_max_vel", "la_vol_index", "med_peak_e_vel", "lat_peak_e_vel",
+ "e_prime_ave"
+)
+
+label_map <- c(
+  e_e_ave        = "E/e' (avg)",    e_e_lat        = "E/e' (lat)",
+  e_e_med        = "E/e' (med)",    mv_a_dur       = "MV A dur",
+  mv_a_point     = "MV A point",    mv_dec_time    = "MV decel time",
+  mv_e_a         = "MV E/A",        tr_max_vel     = "TR Vmax",
+  la_vol_index   = "LAVI",          med_peak_e_vel = "Septal e'",
+  lat_peak_e_vel = "Lateral e'",    e_prime_ave    = "Avg e'"
+)
+
+hcm_primary_indices <- c("e_e_ave", "la_vol_index", "tr_max_vel")
+
+hcm_primary_labels <- c(
+  e_e_ave      = "E/e' (average)",
+  la_vol_index = "LAVI (mL/m\u00B2)",
+  tr_max_vel   = "TR Vmax (cm/s)"
+)
+
+hcm_primary_units <- c(
+  e_e_ave      = "",
+  la_vol_index = " mL/m\u00B2",
+  tr_max_vel   = " cm/s"
+)
+
+ase_cutoffs_hcm <- tibble(
+  variable = hcm_primary_indices,
+  ase_cutoff = c(14, 34, 280),
+  ase_direction = c(">", ">", ">")
+)
+
+ase_cutoffs_all <- tibble(variable = diastolic_indices) %>%
+  left_join(ase_cutoffs_hcm, by = "variable")
+
+cross_sectional_analysis_df <- baseline_df %>%
+  mutate(
+    across(any_of(c("age", "LBMI", "VO2_FRIEND2_PP", "VeVco2_slope", hcm_primary_indices)),
+           ~ as.numeric(as.character(.))),
+    Sex = factor(Sex, levels = c("Male", "Female")),
+    n_primary_indices_available = rowSums(across(all_of(hcm_primary_indices), ~ !is.na(.x))),
+    eligible_cross_sectional_vo2 = !is.na(VO2_FRIEND2_PP) & n_primary_indices_available > 0,
+    eligible_cross_sectional_vevco2 = !is.na(VeVco2_slope) & n_primary_indices_available > 0,
+    eligible_cross_sectional_any = eligible_cross_sectional_vo2 | eligible_cross_sectional_vevco2
+  ) %>%
+  filter(
+    !is.na(age),
+    !is.na(Sex),
+    !is.na(LBMI),
+    eligible_cross_sectional_any
+  )
+
+write.csv(
+  cross_sectional_analysis_df,
+  "../2_Output/Data_CrossSectional_Analysis.csv",
+  row.names = FALSE
+)
+
+fit_rcs_model <- function(df, outcome_var, idx, nk = 4) {
+  df_idx <- df %>%
+    filter(!is.na(.data[[outcome_var]]), !is.na(age), !is.na(Sex),
+           !is.na(LBMI), !is.na(.data[[idx]])) %>%
+    mutate(
+      across(any_of(c(outcome_var, idx, "age", "LBMI")), ~ as.numeric(as.character(.))),
+      Sex = factor(Sex, levels = c("Male", "Female"))
+    )
+
+  if (nrow(df_idx) < 20) return(NULL)
+
+  base <- lm(as.formula(paste0(outcome_var, " ~ age + Sex + LBMI")), data = df_idx)
+  linear <- lm(as.formula(paste0(outcome_var, " ~ age + Sex + LBMI + ", idx)), data = df_idx)
+
+  basis <- Hmisc::rcspline.eval(df_idx[[idx]], nk = nk, inclx = TRUE)
+  knots <- attr(basis, "knots")
+  basis_df <- as_tibble(basis)
+  basis_names <- paste0(idx, "_rcs", seq_len(ncol(basis_df)))
+  names(basis_df) <- basis_names
+
+  df_model <- bind_cols(df_idx, basis_df)
+  spline_formula <- paste(
+    outcome_var,
+    "~ age + Sex + LBMI +",
+    paste(basis_names, collapse = " + ")
+  )
+  spline <- lm(as.formula(spline_formula), data = df_model)
+  overall_test <- anova(base, linear)
+  nonlinear_test <- anova(linear, spline)
+
+  list(
+    df = df_idx,
+    base = base,
+    linear = linear,
+    spline = spline,
+    overall_test = overall_test,
+    nonlinear_test = nonlinear_test,
+    knots = knots
+  )
+}
+
+pred_grid_rcs <- function(var, df, model, knots, lo, hi, n = 200) {
+  newd <- tibble(!!var := seq(lo, hi, length.out = n)) %>%
+    mutate(
+      age = median(df$age, na.rm = TRUE),
+      LBMI = median(df$LBMI, na.rm = TRUE),
+      Sex = factor(names(which.max(table(df$Sex))), levels = levels(df$Sex))
+    )
+
+  basis <- Hmisc::rcspline.eval(newd[[var]], knots = knots, inclx = TRUE)
+  basis_df <- as_tibble(basis)
+  names(basis_df) <- paste0(var, "_rcs", seq_len(ncol(basis_df)))
+  pred_df <- bind_cols(newd, basis_df)
+
+  p <- predict(model, newdata = pred_df, se.fit = TRUE)
+  tibble(
+    x = newd[[var]],
+    fit = p$fit,
+    se = p$se.fit,
+    lo = p$fit - 1.96 * p$se.fit,
+    hi = p$fit + 1.96 * p$se.fit,
+    var = var
+  )
+}
+
+extract_rcs_stats <- function(fit_obj, idx, outcome_key) {
+  tibble(
+    outcome = outcome_key,
+    index = idx,
+    label = hcm_primary_labels[idx],
+    n = nrow(fit_obj$df),
+    delta_AIC_linear = AIC(fit_obj$linear) - AIC(fit_obj$base),
+    delta_AIC_nonlinear = AIC(fit_obj$spline) - AIC(fit_obj$linear),
+    overall_F = fit_obj$overall_test$F[2],
+    overall_p = fit_obj$overall_test$`Pr(>F)`[2],
+    nonlinear_F = fit_obj$nonlinear_test$F[2],
+    nonlinear_p = fit_obj$nonlinear_test$`Pr(>F)`[2],
+    R2_base = summary(fit_obj$base)$r.squared,
+    R2_linear = summary(fit_obj$linear)$r.squared,
+    R2_spline = summary(fit_obj$spline)$r.squared
+  )
+}
+
+format_rcs_stats_label <- function(stats_row) {
+  paste0(
+    "n = ", stats_row$n,
+    "\nOverall p = ", ifelse(stats_row$overall_p < 0.001, "<0.001", sprintf("%.3f", stats_row$overall_p)),
+    "\nNL q = ", ifelse(stats_row$nonlinear_q < 0.001, "<0.001", sprintf("%.3f", stats_row$nonlinear_q)),
+    "\nΔAIC = ", number(stats_row$delta_AIC_nonlinear, accuracy = 0.01)
+  )
+}
+
+select_rcs_focus_indices <- function(...) {
+  stats_tbl <- bind_rows(...)
+  sig_idx <- stats_tbl %>%
+    filter(meaningful_nonlinearity) %>%
+    pull(index) %>%
+    unique()
+
+  if (length(sig_idx) > 0) {
+    return(sig_idx)
+  }
+
+  if ("la_vol_index" %in% stats_tbl$index) {
+    return("la_vol_index")
+  }
+
+  stats_tbl %>%
+    arrange(nonlinear_q, delta_AIC_nonlinear) %>%
+    slice(1) %>%
+    pull(index)
+}
+
+theme_jacc_rcs <- function(base_size = 9.5) {
+  theme_jacc(base_size = base_size) +
+    theme(
+      plot.title = element_blank(),
+      plot.subtitle = element_blank(),
+      legend.position = "none",
+      strip.background = element_rect(fill = "grey97", color = "grey75", linewidth = 0.3),
+      strip.text = element_text(face = "bold", size = base_size, margin = margin(4, 4, 4, 4)),
+      panel.spacing = grid::unit(1.0, "lines"),
+      axis.title.y = element_text(margin = margin(r = 6)),
+      axis.text = element_text(size = base_size - 0.3),
+      plot.margin = margin(4, 10, 4, 4)
+    )
+}
+
+make_rcs_panel <- function(pred_df, idx, y_label, line_color, fill_color, y_limits,
+                           show_y = FALSE, stats_label = NULL, point_df = NULL) {
+  p <- ggplot(pred_df, aes(x = x, y = fit)) +
+    {if (!is.null(point_df) && nrow(point_df) > 0) {
+      geom_point(
+        data = point_df,
+        aes(x = x, y = y),
+        inherit.aes = FALSE,
+        color = alpha("grey35", 0.16),
+        size = 0.55,
+        shape = 16
+      )
+    }} +
+    geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.16, fill = alpha(fill_color, 0.82)) +
+    geom_line(linewidth = 1.05, color = line_color) +
+    geom_vline(
+      xintercept = unique(pred_df$ase_cutoff),
+      color = jacc_cols["gray"],
+      linetype = "dashed",
+      linewidth = 0.55
+    ) +
+    scale_x_continuous(expand = expansion(mult = c(0.02, 0.02))) +
+    scale_y_continuous(
+      limits = y_limits,
+      expand = expansion(mult = c(0.03, 0.08)),
+      labels = label_number(accuracy = 1)
+    ) +
+    labs(
+      title = hcm_primary_labels[idx],
+      x = NULL,
+      y = y_label
+    ) +
+    theme_jacc_rcs() +
+    theme(
+      plot.title = element_text(face = "bold", size = 9.5, hjust = 0.5),
+      plot.margin = margin(4, 4, 4, 4)
+    )
+
+  if (!is.null(stats_label) && nzchar(stats_label)) {
+    p <- p +
+      annotate(
+        "label",
+        x = Inf, y = -Inf,
+        label = stats_label,
+        hjust = 1.02,
+        vjust = -0.15,
+        size = 2.5,
+        lineheight = 0.95,
+        label.size = 0.2,
+        fill = alpha("white", 0.9),
+        color = "black"
+      )
+  }
+
+  if (!show_y) {
+    p <- p + theme(
+      axis.title.y = element_blank(),
+      axis.text.y = element_blank(),
+      axis.ticks.y = element_blank()
+    )
+  }
+
+  p
+}
+```
+
+## Primary outcome: Peak VO$_2$ (FRIEND 2.0 % predicted)
+
+```{r cross_sectional_friend2}
+rcs_friend2_models <- list()
+baseline_lrt <- list()
+
+for (idx in hcm_primary_indices) {
+  fit_obj <- fit_rcs_model(baseline_df, "VO2_FRIEND2_PP", idx, nk = 4)
+  if (is.null(fit_obj)) next
+
+  rcs_friend2_models[[idx]] <- fit_obj
+  baseline_lrt[[idx]] <- extract_rcs_stats(fit_obj, idx, "VO2_FRIEND2_PP")
+}
+
+lrt_table <- bind_rows(baseline_lrt) %>%
+  arrange(nonlinear_p) %>%
+  mutate(
+    nonlinear_q = p.adjust(nonlinear_p, method = "BH"),
+    meaningful_nonlinearity = nonlinear_q < 0.10 & delta_AIC_nonlinear <= -2
+  )
+write.csv(lrt_table, "../2_Output/Stats_CrossSectional_LRT_FRIEND2.csv", row.names = FALSE)
+
+friend2_panel_stats <- lrt_table %>%
+  rowwise() %>%
+  mutate(stats_label = format_rcs_stats_label(cur_data())) %>%
+  ungroup() %>%
+  select(index, stats_label)
+
+if (length(rcs_friend2_models) > 0) {
+  pp_all <- bind_rows(lapply(names(rcs_friend2_models), function(idx) {
+    m <- rcs_friend2_models[[idx]]
+    lo <- quantile(m$df[[idx]], 0.02, na.rm = TRUE)
+    hi <- quantile(m$df[[idx]], 0.98, na.rm = TRUE)
+    pred_grid_rcs(idx, m$df, m$spline, m$knots, lo, hi) %>%
+      mutate(
+        label = hcm_primary_labels[var],
+        ase_cutoff = ase_cutoffs_hcm$ase_cutoff[match(var, ase_cutoffs_hcm$variable)]
+      )
+  })) %>%
+    mutate(label = factor(label, levels = unname(hcm_primary_labels)))
+
+  pp_all_points <- bind_rows(lapply(names(rcs_friend2_models), function(idx) {
+    m <- rcs_friend2_models[[idx]]
+    lo <- quantile(m$df[[idx]], 0.02, na.rm = TRUE)
+    hi <- quantile(m$df[[idx]], 0.98, na.rm = TRUE)
+    m$df %>%
+      transmute(
+        x = .data[[idx]],
+        y = .data[["VO2_FRIEND2_PP"]],
+        var = idx
+      ) %>%
+      filter(is.finite(x), is.finite(y), x >= lo, x <= hi)
+  }))
+}
+```
+
+```{r cross_sectional_lrt_table, results='asis'}
+lrt_table %>%
+  mutate(
+    overall_p = ifelse(overall_p < 0.001, "<0.001", sprintf("%.3f", overall_p)),
+    nonlinear_p = ifelse(nonlinear_p < 0.001, "<0.001", sprintf("%.3f", nonlinear_p)),
+    nonlinear_q = ifelse(nonlinear_q < 0.001, "<0.001", sprintf("%.3f", nonlinear_q)),
+    across(c(delta_AIC_linear, delta_AIC_nonlinear, R2_base, R2_linear, R2_spline, overall_F, nonlinear_F), ~ round(., 2))
+  ) %>%
+  select(
+    `Parameter` = label,
+    `N` = n,
+    `ΔAIC linear` = delta_AIC_linear,
+    `ΔAIC nonlinear` = delta_AIC_nonlinear,
+    `Overall F` = overall_F,
+    `Overall p` = overall_p,
+    `Nonlinear F` = nonlinear_F,
+    `Nonlinear p` = nonlinear_p,
+    `Nonlinear q` = nonlinear_q,
+    `Meaningful nonlinear` = meaningful_nonlinearity
+  ) %>%
+  flextable() %>%
+  bold(part = "header") %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  set_caption("Restricted Cubic Spline Linearity Testing: Peak VO\u2082 (FRIEND 2.0)")
+```
+
+## Secondary outcome: VE/VCO$_2$ slope
+
+```{r cross_sectional_vevco2, fig.width=7.0, fig.height=5.6}
+rcs_vevco2_models <- list()
+vevco2_lrt <- list()
+
+for (idx in hcm_primary_indices) {
+  fit_obj <- fit_rcs_model(baseline_df, "VeVco2_slope", idx, nk = 4)
+  if (is.null(fit_obj)) next
+
+  rcs_vevco2_models[[idx]] <- fit_obj
+  vevco2_lrt[[idx]] <- extract_rcs_stats(fit_obj, idx, "VeVco2_slope")
+}
+
+vevco2_lrt_table <- bind_rows(vevco2_lrt) %>%
+  arrange(nonlinear_p) %>%
+  mutate(
+    nonlinear_q = p.adjust(nonlinear_p, method = "BH"),
+    meaningful_nonlinearity = nonlinear_q < 0.10 & delta_AIC_nonlinear <= -2
+  )
+write.csv(vevco2_lrt_table, "../2_Output/Stats_CrossSectional_LRT_VeVco2.csv", row.names = FALSE)
+
+vevco2_panel_stats <- vevco2_lrt_table %>%
+  rowwise() %>%
+  mutate(stats_label = format_rcs_stats_label(cur_data())) %>%
+  ungroup() %>%
+  select(index, stats_label)
+
+if (length(rcs_vevco2_models) > 0) {
+  pp_vevco2 <- bind_rows(lapply(names(rcs_vevco2_models), function(idx) {
+    m <- rcs_vevco2_models[[idx]]
+    lo <- quantile(m$df[[idx]], 0.02, na.rm = TRUE)
+    hi <- quantile(m$df[[idx]], 0.98, na.rm = TRUE)
+    pred_grid_rcs(idx, m$df, m$spline, m$knots, lo, hi) %>%
+      mutate(
+        label = hcm_primary_labels[var],
+        ase_cutoff = ase_cutoffs_hcm$ase_cutoff[match(var, ase_cutoffs_hcm$variable)]
+      )
+  })) %>%
+    mutate(label = factor(label, levels = unname(hcm_primary_labels)))
+
+  pp_vevco2_points <- bind_rows(lapply(names(rcs_vevco2_models), function(idx) {
+    m <- rcs_vevco2_models[[idx]]
+    lo <- quantile(m$df[[idx]], 0.02, na.rm = TRUE)
+    hi <- quantile(m$df[[idx]], 0.98, na.rm = TRUE)
+    m$df %>%
+      transmute(
+        x = .data[[idx]],
+        y = .data[["VeVco2_slope"]],
+        var = idx
+      ) %>%
+      filter(is.finite(x), is.finite(y), x >= lo, x <= hi)
+  }))
+
+  friend2_limits <- range(c(pp_all$lo, pp_all$hi), na.rm = TRUE)
+  vevco2_limits <- range(c(pp_vevco2$lo, pp_vevco2$hi), na.rm = TRUE)
+
+  friend2_panels_full <- lapply(seq_along(hcm_primary_indices), function(i) {
+    idx <- hcm_primary_indices[i]
+    stats_label <- friend2_panel_stats %>%
+      filter(index == idx) %>%
+      pull(stats_label)
+    make_rcs_panel(
+      pred_df = filter(pp_all, var == idx),
+      idx = idx,
+      y_label = if (i == 1) "Predicted Peak VO2\n(FRIEND 2.0 % Predicted)" else NULL,
+      line_color = jacc_cols["navy"],
+      fill_color = jacc_cols["blue"],
+      y_limits = friend2_limits,
+      show_y = i == 1,
+      stats_label = if (length(stats_label) > 0) stats_label[[1]] else NULL,
+      point_df = filter(pp_all_points, var == idx)
+    )
+  })
+
+  vevco2_panels_full <- lapply(seq_along(hcm_primary_indices), function(i) {
+    idx <- hcm_primary_indices[i]
+    stats_label <- vevco2_panel_stats %>%
+      filter(index == idx) %>%
+      pull(stats_label)
+    make_rcs_panel(
+      pred_df = filter(pp_vevco2, var == idx),
+      idx = idx,
+      y_label = if (i == 1) "Predicted VE/VCO2 Slope" else NULL,
+      line_color = jacc_cols["red"],
+      fill_color = jacc_cols["orange"],
+      y_limits = vevco2_limits,
+      show_y = i == 1,
+      stats_label = if (length(stats_label) > 0) stats_label[[1]] else NULL,
+      point_df = filter(pp_vevco2_points, var == idx)
+    )
+  })
+
+  fig_rcs_full <- wrap_plots(friend2_panels_full, ncol = 3) /
+    wrap_plots(vevco2_panels_full, ncol = 3) +
+    plot_annotation(tag_levels = "A", tag_prefix = "(", tag_suffix = ")") &
+    theme(plot.tag = element_text(face = "bold", size = 11))
+
+  save_jacc(fig_rcs_full, "../2_Output/Figure_S1_RCS_PrimaryParameters_Full.pdf", w = 7.0, h = 5.9)
+  save_jacc(fig_rcs_full, "../Manuscript/Supplemental/Figure_S1_RCS_PrimaryParameters_Full.pdf", w = 7.0, h = 5.9)
+
+  rcs_focus_indices <- select_rcs_focus_indices(lrt_table, vevco2_lrt_table)
+
+  friend2_focus <- lapply(seq_along(rcs_focus_indices), function(i) {
+    idx <- rcs_focus_indices[i]
+    stats_label <- friend2_panel_stats %>%
+      filter(index == idx) %>%
+      pull(stats_label)
+    make_rcs_panel(
+      pred_df = filter(pp_all, var == idx),
+      idx = idx,
+      y_label = "Predicted Peak VO2\n(FRIEND 2.0 % Predicted)",
+      line_color = jacc_cols["navy"],
+      fill_color = jacc_cols["blue"],
+      y_limits = friend2_limits,
+      show_y = TRUE,
+      stats_label = if (length(stats_label) > 0) stats_label[[1]] else NULL,
+      point_df = filter(pp_all_points, var == idx)
+    )
+  })
+
+  vevco2_focus <- lapply(seq_along(rcs_focus_indices), function(i) {
+    idx <- rcs_focus_indices[i]
+    stats_label <- vevco2_panel_stats %>%
+      filter(index == idx) %>%
+      pull(stats_label)
+    make_rcs_panel(
+      pred_df = filter(pp_vevco2, var == idx),
+      idx = idx,
+      y_label = "Predicted VE/VCO2 Slope",
+      line_color = jacc_cols["red"],
+      fill_color = jacc_cols["orange"],
+      y_limits = vevco2_limits,
+      show_y = TRUE,
+      stats_label = if (length(stats_label) > 0) stats_label[[1]] else NULL,
+      point_df = filter(pp_vevco2_points, var == idx)
+    )
+  })
+
+  fig_rcs_combined <- wrap_plots(friend2_focus, ncol = length(rcs_focus_indices)) /
+    wrap_plots(vevco2_focus, ncol = length(rcs_focus_indices)) +
+    plot_annotation(tag_levels = "A", tag_prefix = "(", tag_suffix = ")") &
+    theme(plot.tag = element_text(face = "bold", size = 11))
+
+  show_and_save_jacc(fig_rcs_combined, "../2_Output/Figure3_Nonlinear_DiastolicIndices_RCS.pdf", w = 7.0, h = ifelse(length(rcs_focus_indices) == 1, 4.5, 5.6))
+}
+```
+
+**Figure 3. Focused Restricted Cubic Spline Partial-Effect Plots for Predictors With the Strongest Evidence of Nonlinearity.** Panels show adjusted restricted cubic spline partial-effect curves for the ASE primary diastolic parameter(s) prioritized by the prespecified nonlinearity screen, with Peak VO$_2$ (FRIEND 2.0 % predicted) in the top row and VE/VCO$_2$ slope in the bottom row. Raw observed data are shown as faint background points, shaded bands denote 95% confidence intervals, and dashed vertical lines mark ASE 2025 thresholds. In-panel boxes report the complete-case sample size, overall association p value, nonlinearity q value, and spline-vs-linear \u0394AIC. The full six-panel primary-parameter RCS display is exported separately to the supplemental output. Abbreviations: ASE = American Society of Echocardiography; CI = confidence interval; HCM = hypertrophic cardiomyopathy; LAVI = left atrial volume index; TR V$_{max}$ = peak tricuspid regurgitation velocity; VE/VCO$_2$ = ventilatory efficiency slope; VO$_2$ = oxygen consumption.
+
+```{r figure3_summary_table, results='asis'}
+figure3_summary_table <- bind_rows(
+  lrt_table %>% mutate(outcome_label = "Peak VO\u2082 (FRIEND 2.0 % predicted)"),
+  vevco2_lrt_table %>% mutate(outcome_label = "VE/VCO\u2082 slope")
+) %>%
+  mutate(
+    Interpretation = case_when(
+      outcome == "VO2_FRIEND2_PP" & !meaningful_nonlinearity & overall_p >= 0.05 ~ "No meaningful association",
+      outcome == "VO2_FRIEND2_PP" & overall_p < 0.05 ~ "Association without meaningful nonlinearity",
+      outcome == "VeVco2_slope" & meaningful_nonlinearity ~ "Meaningful nonlinearity",
+      outcome == "VeVco2_slope" & overall_p < 0.05 ~ "Approximately linear association",
+      TRUE ~ "No meaningful association"
+    ),
+    overall_p_fmt = ifelse(overall_p < 0.001, "<0.001", sprintf("%.3f", overall_p)),
+    nonlinear_q_fmt = ifelse(nonlinear_q < 0.001, "<0.001", sprintf("%.3f", nonlinear_q)),
+    delta_AIC_nonlinear = round(delta_AIC_nonlinear, 2),
+    `Outcome` = outcome_label,
+    `Parameter` = label,
+    `N` = n,
+    `Overall p` = overall_p_fmt,
+    `Nonlinearity q` = nonlinear_q_fmt,
+    `Spline vs linear Delta AIC` = delta_AIC_nonlinear
+  ) %>%
+  select(`Outcome`, `Parameter`, `N`, `Overall p`, `Nonlinearity q`, `Spline vs linear Delta AIC`, Interpretation)
+
+figure3_ft <- figure3_summary_table %>%
+  flextable() %>%
+  bold(part = "header") %>%
+  bold(i = ~ Interpretation == "Meaningful nonlinearity", j = c("Parameter", "Interpretation"), bold = TRUE) %>%
+  align(j = c("Outcome", "Parameter", "Interpretation"), align = "left", part = "all") %>%
+  border_outer(border = officer::fp_border(color = "black", width = 1)) %>%
+  border_inner_h(border = officer::fp_border(color = "black", width = 0.6), part = "all") %>%
+  border_inner_v(border = officer::fp_border(color = "black", width = 0.6), part = "all") %>%
+  fontsize(size = 9, part = "all") %>%
+  padding(padding = 4, part = "all") %>%
+  set_table_properties(layout = "autofit") %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  set_caption("Table 2. Nested Restricted Cubic Spline Summary Supporting Figure 3")
+
+figure3_ft
+
+figure3_summary_table %>%
+  write.csv("../2_Output/Table2_Figure3_RCS_Summary.csv", row.names = FALSE)
+
+figure3_ft %>%
+  save_as_docx(path = "../2_Output/Table2_Figure3_RCS_Summary.docx")
+```
+
+## Sensitivity: Echo alignment window
+
+```{r sensitivity_window}
+run_window <- function(w, idx, outcome_var = "VO2_FRIEND2_PP") {
+  tmp <- cpx_aligned %>%
+    left_join(echo_all, by = "MRN", relationship = "many-to-many") %>%
+    mutate(
+      delta_days = as.numeric(cpx_test_date - echo_date),
+      abs_delta_days = abs(delta_days)
+    ) %>%
+    filter(!is.na(delta_days), abs_delta_days <= w) %>%
+    group_by(ID, CPX.sequential, cpx_test_date) %>%
+    slice_min(order_by = abs_delta_days, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    mutate(
+      e_prime_ave = ifelse(!is.na(med_peak_e_vel) & !is.na(lat_peak_e_vel),
+                           (med_peak_e_vel + lat_peak_e_vel) / 2,
+                           coalesce(med_peak_e_vel, lat_peak_e_vel))
+    ) %>%
+    mutate(across(any_of(c(idx, "age", "LBMI", outcome_var)), ~ as.numeric(as.character(.))),
+           Sex = factor(Sex, levels = c(0, 1), labels = c("Male", "Female")))
+
+  base <- tmp %>%
+    group_by(ID) %>% arrange(days_from_baseline) %>% slice(1) %>% ungroup() %>%
+    filter(!is.na(.data[[outcome_var]]), !is.na(.data[[idx]]), !is.na(age), !is.na(Sex), !is.na(LBMI))
+
+  if (nrow(base) < 20) return(tibble(window_days = w, index = idx, n = nrow(base),
+                                      delta_AIC = NA_real_, p_value = NA_real_))
+
+  fit_obj <- fit_rcs_model(base, outcome_var, idx, nk = 4)
+  if (is.null(fit_obj)) {
+    return(tibble(window_days = w, index = idx, n = nrow(base),
+                  delta_AIC = NA_real_, p_value = NA_real_))
+  }
+
+  tibble(window_days = w, index = idx, n = nrow(base),
+         delta_AIC = AIC(fit_obj$spline) - AIC(fit_obj$linear),
+         p_value = fit_obj$nonlinear_test$`Pr(>F)`[2])
+}
+
+sens <- bind_rows(lapply(hcm_primary_indices, function(idx) {
+  bind_rows(run_window(180, idx), run_window(365, idx), run_window(730, idx))
+}))
+
+write.csv(sens, "../2_Output/Sensitivity_EchoWindow_FRIEND2.csv", row.names = FALSE)
+```
+
+# OMARX: Adaptive Threshold Discovery
+
+OMARX, implemented from the newer local `omarx_v3.ipynb` notebook engine, was used to compare a MARS-style global discovery strategy against a confirmatory additive fit while keeping the manuscript outcomes unchanged. The revised OMARX analysis is intended to clarify whether Peak VO$_2$ is driven primarily by age/body-size structure and whether VE/VCO$_2$ slope shows stronger cardiac contribution from LAVI, TR V$_{max}$, medial septal e$'$, septal thickness, and obstruction.
+
+Primary OMARX models use the same baseline HCM cohort but expand the predictor set to include cardiac and body-composition variables highlighted in the new notebook and the feedback note. Complete-case MARS models are treated as the primary discovery analysis, additive fits are confirmatory, and targeted QC is added for clinical-knot protection, TRV informative missingness, BMI-vs-LBMI choice, binary obstruction coding, predictor imputation, and bootstrap stability of the LAVI knot in VE/VCO$_2$.
+
+```{python omar_modular_config, include=FALSE}
+from pathlib import Path
+import sys
+import warnings
+
+from sklearn.experimental import enable_iterative_imputer  # noqa: F401
+from sklearn.impute import IterativeImputer
+
+warnings.filterwarnings("ignore", category=FutureWarning)
+
+vendor_dir = Path.cwd() / "python_vendor"
+if vendor_dir.exists() and str(vendor_dir) not in sys.path:
+    sys.path.insert(0, str(vendor_dir))
+
+from omarx_from_notebook import (
+    OMARXConfig,
+    omarx_fit,
+    helper_build_basis_for_knots,
+    helper_build_interactions,
+    helper_detect_tracks,
+    helper_feature_importance,
+    sm,
+    np,
+    pd,
+)
+```
+
+```{python omar_modular_helpers, include=FALSE}
+def helper_inverse_standardize(values, col: str, config: OMARXConfig):
+    arr = np.asarray(values, dtype=float)
+    if col not in config.scaling_params:
+        return arr
+    pars = config.scaling_params[col]
+    return arr * pars["scale"] + pars["center"]
+
+
+def helper_mode_value(series: pd.Series):
+    mode = series.mode(dropna=True)
+    if len(mode) > 0:
+        return mode.iloc[0]
+    non_missing = series.dropna()
+    return non_missing.iloc[0] if len(non_missing) > 0 else 0
+
+
+def helper_build_model_columns(config: OMARXConfig, include_interactions: bool = False):
+    model_cols = []
+    model_cols += list(config.binary_vars)
+    for var in config.adaptive_vars:
+        model_cols.append(var)
+        model_cols += config.basis_columns.get(var, [])
+    if include_interactions:
+        model_cols += list(config.interaction_columns)
+    return [col for i, col in enumerate(model_cols) if col not in model_cols[:i]]
+
+
+def helper_extract_basis_rows(config: OMARXConfig, outcome: str, mode: str, predictor_set_name: str, qc_variant: str):
+    rows = []
+    if getattr(config, "final_model", None) is None:
+        return pd.DataFrame(columns=["outcome", "mode", "predictor_set_name", "qc_variant", "variable", "knot", "type", "coefficient", "basis_index"])
+
+    params = config.final_model.params
+
+    for var in config.adaptive_vars:
+        if var in params.index:
+            rows.append({
+                "outcome": outcome,
+                "mode": mode,
+                "predictor_set_name": predictor_set_name,
+                "qc_variant": qc_variant,
+                "variable": var,
+                "knot": np.nan,
+                "type": "linear",
+                "coefficient": round(float(params[var]), 4),
+                "basis_index": -1
+            })
+
+        for basis_index, (k_scaled, basis_col) in enumerate(zip(
+            config.final_knots_scaled.get(var, []),
+            config.basis_columns.get(var, [])
+        )):
+            if basis_col not in params.index:
+                continue
+            rows.append({
+                "outcome": outcome,
+                "mode": mode,
+                "predictor_set_name": predictor_set_name,
+                "qc_variant": qc_variant,
+                "variable": var,
+                "knot": round(float(helper_inverse_standardize(k_scaled, var, config)), 2),
+                "type": "hinge",
+                "coefficient": round(float(params[basis_col]), 4),
+                "basis_index": basis_index
+            })
+
+    for var in config.binary_vars:
+        if var in params.index:
+            rows.append({
+                "outcome": outcome,
+                "mode": mode,
+                "predictor_set_name": predictor_set_name,
+                "qc_variant": qc_variant,
+                "variable": var,
+                "knot": np.nan,
+                "type": "linear",
+                "coefficient": round(float(params[var]), 4),
+                "basis_index": -1
+            })
+
+    return pd.DataFrame(rows)
+
+
+def helper_summarize_thresholds(basis_df: pd.DataFrame) -> pd.DataFrame:
+    cols = ["outcome", "mode", "predictor_set_name", "qc_variant", "variable", "knot", "n_basis_terms", "max_abs_coefficient", "direction"]
+    if basis_df.empty:
+        return pd.DataFrame(columns=cols)
+
+    hinge_df = basis_df[basis_df["type"] == "hinge"].copy()
+    if hinge_df.empty:
+        return pd.DataFrame(columns=cols)
+
+    hinge_df["abs_coefficient"] = hinge_df["coefficient"].abs()
+    out = (
+        hinge_df
+        .groupby(["outcome", "mode", "predictor_set_name", "qc_variant", "variable", "knot"], as_index=False)
+        .agg(
+            n_basis_terms=("basis_index", "nunique"),
+            max_abs_coefficient=("abs_coefficient", "max"),
+            direction_score=("coefficient", "sum")
+        )
+    )
+    out["direction"] = np.where(out["direction_score"] >= 0, "positive", "negative")
+    out["max_abs_coefficient"] = out["max_abs_coefficient"].round(4)
+    return out.drop(columns="direction_score").sort_values(["outcome", "mode", "variable", "knot"])
+
+
+def helper_build_partial_dependence(config: OMARXConfig, df_complete: pd.DataFrame, variable: str, outcome: str,
+                                    mode: str, predictor_set_name: str, qc_variant: str, n_points: int = 200) -> pd.DataFrame:
+    if variable not in config.adaptive_vars:
+        return pd.DataFrame()
+
+    x_values = np.linspace(
+        np.nanpercentile(df_complete[variable], 2),
+        np.nanpercentile(df_complete[variable], 98),
+        n_points
+    )
+    if not np.all(np.isfinite(x_values)) or np.nanmax(x_values) <= np.nanmin(x_values):
+        return pd.DataFrame()
+
+    grid_raw = pd.DataFrame(index=np.arange(n_points))
+    for var in config.adaptive_vars:
+        grid_raw[var] = float(df_complete[var].median())
+    for var in config.binary_vars:
+        grid_raw[var] = helper_mode_value(df_complete[var])
+    grid_raw[variable] = x_values
+
+    grid_scaled = grid_raw.copy()
+    for var in config.adaptive_vars:
+        center = config.scaling_params[var]["center"]
+        scale = config.scaling_params[var]["scale"]
+        grid_scaled[var] = (grid_raw[var] - center) / scale
+
+    df_basis, _ = helper_build_basis_for_knots(grid_scaled.copy(), config.final_knots_scaled)
+    if helper_build_interactions is not None and len(config.interaction_columns) > 0:
+        df_basis, _ = helper_build_interactions(df_basis, config)
+
+    model_cols = helper_build_model_columns(config, include_interactions = len(config.interaction_columns) > 0)
+    y_pred = np.asarray(
+        config.final_model.predict(sm.add_constant(df_basis[model_cols], has_constant="add")),
+        dtype=float
+    )
+
+    return pd.DataFrame({
+        "x": x_values,
+        "y_pred": y_pred,
+        "variable": variable,
+        "outcome": outcome,
+        "mode": mode,
+        "predictor_set_name": predictor_set_name,
+        "qc_variant": qc_variant
+    })
+
+
+def clean_omar_source(df_source: pd.DataFrame):
+    df = df_source.copy()
+    numeric_cols = [
+        "e_e_ave", "la_vol_index", "tr_max_vel", "med_peak_e_vel",
+        "lv_septal_thickness", "lvot_max_gradient", "age", "BMI", "LBMI",
+        "VO2_FRIEND2_PP", "VeVco2_slope"
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    qc_rows = []
+    qc_rows.append({"step": "initial_rows", "n_rows": int(len(df)), "details": "Raw baseline rows entering OMARX"})
+
+    bad_ee = int(((df["e_e_ave"] > 30) & df["e_e_ave"].notna()).sum()) if "e_e_ave" in df.columns else 0
+    bad_septal_e = int(((df["med_peak_e_vel"] > 30) & df["med_peak_e_vel"].notna()).sum()) if "med_peak_e_vel" in df.columns else 0
+    bad_trv = int(((df["tr_max_vel"] > 400) & df["tr_max_vel"].notna()).sum()) if "tr_max_vel" in df.columns else 0
+    neg_lvot = int(((df["lvot_max_gradient"] < 0) & df["lvot_max_gradient"].notna()).sum()) if "lvot_max_gradient" in df.columns else 0
+    missing_lvot = int(df["lvot_max_gradient"].isna().sum()) if "lvot_max_gradient" in df.columns else 0
+
+    if "e_e_ave" in df.columns:
+        df.loc[df["e_e_ave"] > 30, "e_e_ave"] = np.nan
+    if "med_peak_e_vel" in df.columns:
+        df.loc[df["med_peak_e_vel"] > 30, "med_peak_e_vel"] = np.nan
+    if "tr_max_vel" in df.columns:
+        df.loc[df["tr_max_vel"] > 400, "tr_max_vel"] = np.nan
+    if "lvot_max_gradient" in df.columns:
+        df.loc[df["lvot_max_gradient"] < 0, "lvot_max_gradient"] = 0
+
+    df["Sex_num"] = pd.to_numeric(df["Sex"].map({"Male": 0, "Female": 1}), errors="coerce")
+    df["lvot_gradient_cont"] = df["lvot_max_gradient"]
+    df["max_pg_30"] = (df["lvot_gradient_cont"].fillna(0) > 30).astype(int)
+    df["trv_missing"] = df["tr_max_vel"].isna().astype(int)
+    df["trv_value"] = df["tr_max_vel"].fillna(0)
+
+    qc_rows.extend([
+        {"step": "implausible_e_e_removed", "n_rows": bad_ee, "details": "E/e' > 30 set to missing"},
+        {"step": "implausible_medial_e_removed", "n_rows": bad_septal_e, "details": "Septal e' > 30 set to missing"},
+        {"step": "implausible_trv_removed", "n_rows": bad_trv, "details": "TR Vmax > 400 set to missing"},
+        {"step": "negative_lvot_clipped", "n_rows": neg_lvot, "details": "Negative LVOT gradients clipped to zero"},
+        {"step": "missing_lvot_documented", "n_rows": missing_lvot, "details": "Missing LVOT gradients retained for continuous model and coded to 0 only for max_pg_30"}
+    ])
+
+    return df, pd.DataFrame(qc_rows)
+
+
+def build_imputed_dataset(df_source: pd.DataFrame, outcome: str, predictors: list):
+    cols = [outcome] + predictors
+    dat = df_source[cols].copy()
+    dat = dat[dat[outcome].notna()].copy()
+    if len(dat) == 0:
+        return dat
+
+    imputer = IterativeImputer(
+        random_state=20260329,
+        max_iter=20,
+        sample_posterior=False,
+        initial_strategy="median",
+        skip_complete=True
+    )
+    imputed = imputer.fit_transform(dat)
+    out = pd.DataFrame(imputed, columns=cols, index=dat.index)
+    for col in ["Sex_num", "max_pg_30", "trv_missing"]:
+        if col in out.columns:
+            out[col] = (out[col] >= 0.5).astype(int)
+    if "trv_value" in out.columns:
+        out["trv_value"] = out["trv_value"].clip(lower=0)
+    if "lvot_gradient_cont" in out.columns:
+        out["lvot_gradient_cont"] = out["lvot_gradient_cont"].clip(lower=0)
+    return out
+
+
+def fit_omarx_variant(
+    df_source: pd.DataFrame,
+    outcome: str,
+    predictors: list,
+    target_vars: list,
+    predictor_set_name: str,
+    qc_variant: str,
+    mode: str,
+    clinical_knots_dict: dict = None,
+    protect_clinical_knots: bool = False,
+    global_max_knots: int = 6,
+    min_span: float = 0.10,
+    variable_max_knots_dict: dict = None,
+    impute_predictors: bool = False,
+    include_importance: bool = True
+):
+    clinical_knots_dict = clinical_knots_dict or {}
+    variable_max_knots_dict = variable_max_knots_dict or {}
+
+    if impute_predictors:
+        df_model = build_imputed_dataset(df_source, outcome, predictors)
+    else:
+        df_model = df_source[[outcome] + predictors].copy()
+
+    precheck = OMARXConfig(y=outcome, X=predictors, task_type="regression")
+    df_complete = helper_detect_tracks(df_model, precheck)
+    if precheck.final_n < 40:
+        print(f"OMARX skipped for {outcome} [{mode}|{qc_variant}|{predictor_set_name}]: insufficient complete-case sample.")
+        return None
+
+    try:
+        config, df_basis = omarx_fit(
+            df=df_model,
+            y=outcome,
+            X=predictors,
+            task_type="regression",
+            mode=mode,
+            include_interactions=False,
+            standardize="robust",
+            fit_method="ols",
+            remove_nan=True,
+            global_max_knots=int(global_max_knots),
+            variable_max_knots_dict=variable_max_knots_dict,
+            clinical_knots_dict=clinical_knots_dict,
+            protect_clinical_knots=protect_clinical_knots,
+            min_span=float(min_span),
+            polish_knots=False,
+            run_univariable=False,
+            run_multivariable=True,
+            print_summary=False,
+            show_plots=False,
+            save=False,
+            save_prefix=f"omarx_{outcome.lower()}_{mode}_{qc_variant}"
+        )
+    except Exception as e:
+        print(f"OMARX fitting failed for {outcome} [{mode}|{qc_variant}|{predictor_set_name}]: {e}")
+        return None
+
+    if getattr(config, "final_model", None) is None:
+        print(f"OMARX skipped for {outcome} [{mode}|{qc_variant}|{predictor_set_name}]: no fitted model returned.")
+        return None
+
+    try:
+        basis_df = helper_extract_basis_rows(config, outcome, mode, predictor_set_name, qc_variant)
+        threshold_df = helper_summarize_thresholds(basis_df)
+        if "variable" in threshold_df.columns:
+            threshold_df = threshold_df[threshold_df["variable"].isin(target_vars)].copy()
+        else:
+            threshold_df = pd.DataFrame()
+
+        pd_frames = []
+        for var in target_vars:
+            if var not in predictors:
+                continue
+            pd_frame = helper_build_partial_dependence(
+                config=config,
+                df_complete=df_complete,
+                variable=var,
+                outcome=outcome,
+                mode=mode,
+                predictor_set_name=predictor_set_name,
+                qc_variant=qc_variant
+            )
+            if not pd_frame.empty:
+                pd_frames.append(pd_frame)
+        partial_dep_df = pd.concat(pd_frames, ignore_index=True) if pd_frames else pd.DataFrame()
+
+        importance_df = pd.DataFrame()
+        if include_importance:
+            try:
+                importance_df = helper_feature_importance(df_basis, config, include_interactions=False, _plot=False)
+                if not importance_df.empty:
+                    importance_df["outcome"] = outcome
+                    importance_df["mode"] = mode
+                    importance_df["predictor_set_name"] = predictor_set_name
+                    importance_df["qc_variant"] = qc_variant
+            except Exception as e:
+                print(f"Feature importance failed for {outcome} [{mode}|{qc_variant}|{predictor_set_name}]: {e}")
+
+        predictors_used = list(config.adaptive_vars) + list(config.binary_vars)
+        summary = getattr(config, "model_summary", {}) or {}
+
+        result = {
+            "outcome": outcome,
+            "mode": mode,
+            "predictor_set_name": predictor_set_name,
+            "qc_variant": qc_variant,
+            "n_complete": int(precheck.final_n),
+            "n": int(summary.get("n", precheck.final_n)),
+            "r2": round(float(summary.get("r2", np.nan)), 4),
+            "adj_r2": round(float(summary.get("adj_r2", np.nan)), 4),
+            "aic": round(float(summary.get("aic", np.nan)), 2),
+            "bic": round(float(summary.get("bic", np.nan)), 2),
+            "basis": basis_df.to_dict(orient="records") if not basis_df.empty else [],
+            "threshold_summary": threshold_df.to_dict(orient="records") if not threshold_df.empty else [],
+            "partial_dep": partial_dep_df.to_dict(orient="records") if not partial_dep_df.empty else [],
+            "importance": importance_df.to_dict(orient="records") if not importance_df.empty else [],
+            "predictors": predictors_used,
+            "global_max_knots": int(global_max_knots),
+            "min_span": float(min_span),
+            "clinical_knots_protected": bool(protect_clinical_knots),
+            "config": {
+                "adaptive_vars": list(config.adaptive_vars),
+                "binary_vars": list(config.binary_vars),
+                "dropped_vars": list(config.dropped_vars),
+                "scaling": config.standardize,
+                "clinical_knots_dict": clinical_knots_dict
+            }
+        }
+        return result
+    except Exception as e:
+        print(f"OMARX post-processing failed for {outcome} [{mode}|{qc_variant}|{predictor_set_name}]: {e}")
+        return None
+
+
+def bootstrap_lavi_stability(df_source: pd.DataFrame, outcome: str, predictors: list, target_vars: list,
+                             n_boot: int = 200) -> pd.DataFrame:
+    df_model = df_source[[outcome] + predictors].dropna().copy()
+    if len(df_model) < 40:
+        return pd.DataFrame()
+
+    rng = np.random.default_rng(20260329)
+    rows = []
+    for i in range(n_boot):
+        sampled_idx = rng.choice(df_model.index.to_numpy(), size=len(df_model), replace=True)
+        boot_df = df_model.loc[sampled_idx].reset_index(drop=True)
+        fit = fit_omarx_variant(
+            df_source=boot_df,
+            outcome=outcome,
+            predictors=predictors,
+            target_vars=target_vars,
+            predictor_set_name="heart_bmi_primary",
+            qc_variant="bootstrap_primary",
+            mode="mars",
+            global_max_knots=6,
+            min_span=0.10,
+            variable_max_knots_dict={
+                "e_e_ave": 1,
+                "la_vol_index": 1,
+                "tr_max_vel": 1,
+                "med_peak_e_vel": 1,
+                "lv_septal_thickness": 1,
+                "lvot_gradient_cont": 1,
+                "age": 1,
+                "BMI": 1
+            },
+            include_importance=False
+        )
+        if fit is None:
+            rows.append({"iteration": i + 1, "retained_lavi": 0, "knot": np.nan})
+            continue
+
+        th = pd.DataFrame(fit["threshold_summary"])
+        if th.empty or "variable" not in th.columns:
+            rows.append({"iteration": i + 1, "retained_lavi": 0, "knot": np.nan})
+            continue
+        lavi = th[th["variable"] == "la_vol_index"].copy()
+        if lavi.empty:
+            rows.append({"iteration": i + 1, "retained_lavi": 0, "knot": np.nan})
+        else:
+            lavi["dist_34"] = (lavi["knot"] - 34).abs()
+            best_row = lavi.sort_values("dist_34").iloc[0]
+            rows.append({"iteration": i + 1, "retained_lavi": 1, "knot": float(best_row["knot"])})
+    return pd.DataFrame(rows)
+```
+
+```{python omar_analysis, eval=TRUE, include=FALSE}
+cross_sectional_export = Path.cwd().parent / "2_Output" / "Data_CrossSectional_Analysis.csv"
+if cross_sectional_export.exists():
+    baseline_r = pd.read_csv(cross_sectional_export)
+else:
+    baseline_r = r.baseline_df.copy()
+outcome_vars = ["VO2_FRIEND2_PP", "VeVco2_slope"]
+target_vars = ["e_e_ave", "la_vol_index", "tr_max_vel", "med_peak_e_vel", "lv_septal_thickness"]
+
+omar_clean_df, omar_qc_steps = clean_omar_source(baseline_r)
+
+primary_predictors = ["e_e_ave", "la_vol_index", "tr_max_vel", "med_peak_e_vel", "lv_septal_thickness", "lvot_gradient_cont", "age", "BMI", "Sex_num"]
+trv_missing_predictors = ["e_e_ave", "la_vol_index", "trv_missing", "trv_value", "med_peak_e_vel", "lv_septal_thickness", "lvot_gradient_cont", "age", "BMI", "Sex_num"]
+lbmi_predictors = ["e_e_ave", "la_vol_index", "tr_max_vel", "med_peak_e_vel", "lv_septal_thickness", "lvot_gradient_cont", "age", "LBMI", "Sex_num"]
+binary_lvot_predictors = ["e_e_ave", "la_vol_index", "tr_max_vel", "med_peak_e_vel", "lv_septal_thickness", "max_pg_30", "age", "BMI", "Sex_num"]
+
+clinical_knots = {"e_e_ave": [14.0], "la_vol_index": [34.0], "tr_max_vel": [280.0], "med_peak_e_vel": [6.5]}
+primary_knot_limits = {
+    "e_e_ave": 1,
+    "la_vol_index": 1,
+    "tr_max_vel": 1,
+    "med_peak_e_vel": 1,
+    "lv_septal_thickness": 1,
+    "lvot_gradient_cont": 1,
+    "age": 1,
+    "BMI": 1
+}
+
+omar_results = {}
+omar_model_rows = []
+omar_threshold_rows = []
+omar_importance_rows = []
+omar_partial_rows = []
+omar_qc_rows = omar_qc_steps.to_dict(orient="records")
+
+model_specs = []
+for outcome in outcome_vars:
+    model_specs.extend([
+        {
+            "outcome": outcome,
+            "mode": "mars",
+            "predictor_set_name": "heart_bmi_primary",
+            "qc_variant": "complete_case",
+            "predictors": primary_predictors,
+            "clinical_knots_dict": {},
+            "protect_clinical_knots": False,
+            "variable_max_knots_dict": primary_knot_limits,
+            "impute_predictors": False
+        },
+        {
+            "outcome": outcome,
+            "mode": "additive",
+            "predictor_set_name": "heart_bmi_primary",
+            "qc_variant": "complete_case",
+            "predictors": primary_predictors,
+            "clinical_knots_dict": {},
+            "protect_clinical_knots": False,
+            "variable_max_knots_dict": primary_knot_limits,
+            "impute_predictors": False
+        },
+        {
+            "outcome": outcome,
+            "mode": "mars",
+            "predictor_set_name": "heart_lbmi_sensitivity",
+            "qc_variant": "lbmi_sensitivity",
+            "predictors": lbmi_predictors,
+            "clinical_knots_dict": {},
+            "protect_clinical_knots": False,
+            "variable_max_knots_dict": {
+                "e_e_ave": 1, "la_vol_index": 1, "tr_max_vel": 1, "med_peak_e_vel": 1,
+                "lv_septal_thickness": 1, "lvot_gradient_cont": 1, "age": 1, "LBMI": 1
+            },
+            "impute_predictors": False
+        },
+        {
+            "outcome": outcome,
+            "mode": "mars",
+            "predictor_set_name": "heart_trv_missing_sensitivity",
+            "qc_variant": "trv_missing_sensitivity",
+            "predictors": trv_missing_predictors,
+            "clinical_knots_dict": {},
+            "protect_clinical_knots": False,
+            "variable_max_knots_dict": {
+                "e_e_ave": 1, "la_vol_index": 1, "trv_value": 2, "med_peak_e_vel": 1,
+                "lv_septal_thickness": 1, "lvot_gradient_cont": 1, "age": 1, "BMI": 1
+            },
+            "impute_predictors": False
+        },
+        {
+            "outcome": outcome,
+            "mode": "mars",
+            "predictor_set_name": "heart_binary_lvot_sensitivity",
+            "qc_variant": "binary_lvot_sensitivity",
+            "predictors": binary_lvot_predictors,
+            "clinical_knots_dict": {},
+            "protect_clinical_knots": False,
+            "variable_max_knots_dict": {
+                "e_e_ave": 1, "la_vol_index": 1, "tr_max_vel": 1, "med_peak_e_vel": 1,
+                "lv_septal_thickness": 1, "age": 1, "BMI": 1
+            },
+            "impute_predictors": False
+        },
+        {
+            "outcome": outcome,
+            "mode": "mars",
+            "predictor_set_name": "heart_bmi_imputed",
+            "qc_variant": "imputed_predictors",
+            "predictors": primary_predictors,
+            "clinical_knots_dict": {},
+            "protect_clinical_knots": False,
+            "variable_max_knots_dict": primary_knot_limits,
+            "impute_predictors": True
+        }
+    ])
+
+model_specs.append(
+    {
+        "outcome": "VeVco2_slope",
+        "mode": "mars",
+        "predictor_set_name": "heart_bmi_clinical_knots",
+        "qc_variant": "clinical_knot_sensitivity",
+        "predictors": primary_predictors,
+        "clinical_knots_dict": clinical_knots,
+        "protect_clinical_knots": True,
+        "variable_max_knots_dict": primary_knot_limits,
+        "impute_predictors": False
+    }
+)
+
+for spec in model_specs:
+    fit = fit_omarx_variant(
+        df_source=omar_clean_df,
+        outcome=spec["outcome"],
+        predictors=spec["predictors"],
+        target_vars=target_vars,
+        predictor_set_name=spec["predictor_set_name"],
+        qc_variant=spec["qc_variant"],
+        mode=spec["mode"],
+        clinical_knots_dict=spec["clinical_knots_dict"],
+        protect_clinical_knots=spec["protect_clinical_knots"],
+        global_max_knots=6,
+        min_span=0.10,
+        variable_max_knots_dict=spec["variable_max_knots_dict"],
+        impute_predictors=spec["impute_predictors"]
+    )
+    if fit is None:
+        continue
+
+    key = f"{spec['outcome']}|{spec['mode']}|{spec['qc_variant']}|{spec['predictor_set_name']}"
+    omar_results[key] = fit
+    omar_model_rows.append({
+        "outcome": fit["outcome"],
+        "mode": fit["mode"],
+        "predictor_set_name": fit["predictor_set_name"],
+        "qc_variant": fit["qc_variant"],
+        "n_complete": fit["n_complete"],
+        "n": fit["n"],
+        "r2": fit["r2"],
+        "adj_r2": fit["adj_r2"],
+        "aic": fit["aic"],
+        "bic": fit["bic"],
+        "n_predictors": len(fit["predictors"]),
+        "clinical_knots_protected": fit["clinical_knots_protected"]
+    })
+    omar_qc_rows.append({
+        "step": "model_fit",
+        "n_rows": fit["n_complete"],
+        "details": (
+            f"{fit['outcome']} | {fit['mode']} | {fit['qc_variant']} | "
+            f"{fit['predictor_set_name']} | AIC={fit['aic']} | R2={fit['r2']}"
+        )
+    })
+    if len(fit["threshold_summary"]) > 0:
+        omar_threshold_rows.extend(fit["threshold_summary"])
+    if len(fit["importance"]) > 0:
+        omar_importance_rows.extend(fit["importance"])
+    if len(fit["partial_dep"]) > 0:
+        omar_partial_rows.extend(fit["partial_dep"])
+
+bootstrap_df = bootstrap_lavi_stability(
+    df_source=omar_clean_df,
+    outcome="VeVco2_slope",
+    predictors=primary_predictors,
+    target_vars=target_vars,
+    n_boot=200
+)
+
+if not bootstrap_df.empty:
+    retained = bootstrap_df[bootstrap_df["retained_lavi"] == 1].copy()
+    omar_bootstrap_rows = [{
+        "outcome": "VeVco2_slope",
+        "variable": "la_vol_index",
+        "n_boot": int(len(bootstrap_df)),
+        "retention_frequency": round(float(bootstrap_df["retained_lavi"].mean()), 4),
+        "median_knot": round(float(retained["knot"].median()), 2) if len(retained) > 0 else np.nan,
+        "iqr_low": round(float(retained["knot"].quantile(0.25)), 2) if len(retained) > 0 else np.nan,
+        "iqr_high": round(float(retained["knot"].quantile(0.75)), 2) if len(retained) > 0 else np.nan,
+        "pct_within_5_of_34": round(float(((retained["knot"] - 34).abs() <= 5).mean()), 4) if len(retained) > 0 else np.nan
+    }]
+else:
+    omar_bootstrap_rows = []
+```
+
+```{r omar_prepare, include=FALSE}
+outcome_label_map <- c(
+  "VO2_FRIEND2_PP" = "Peak VO\u2082 (% Predicted)",
+  "VeVco2_slope"   = "VE/VCO\u2082 Slope"
+)
+
+omar_var_labels <- c(
+  e_e_ave = "E/e' (average)",
+  la_vol_index = "LAVI",
+  tr_max_vel = "TR Vmax",
+  trv_value = "TR Vmax value",
+  trv_missing = "TR Vmax missing indicator",
+  med_peak_e_vel = "Medial septal e'",
+  lv_septal_thickness = "LV septal thickness",
+  lvot_gradient_cont = "Max LVOT gradient",
+  max_pg_30 = "LVOT >30 mm Hg",
+  age = "Age",
+  BMI = "BMI",
+  LBMI = "LBMI",
+  Sex_num = "Female sex"
+)
+
+as_tbl <- function(x) {
+  if (is.null(x) || length(x) == 0) return(tibble())
+  x <- tryCatch(reticulate::py_to_r(x), error = function(e) x)
+  if (is.data.frame(x)) return(as_tibble(x))
+  if (is.list(x)) {
+    out <- bind_rows(lapply(x, function(row) {
+      if (is.null(row) || length(row) == 0) return(NULL)
+      as.list(row)
+    }))
+    return(as_tibble(out))
+  }
+  as_tibble(x)
+}
+
+empty_threshold_tbl <- tibble(
+  outcome = character(), mode = character(), predictor_set_name = character(),
+  qc_variant = character(), variable = character(), knot = numeric(),
+  n_basis_terms = integer(), max_abs_coefficient = numeric(), direction = character(),
+  ase_cutoff = numeric(), outcome_label = character(), var_label = character(),
+  delta_vs_ase = numeric()
+)
+empty_pd_tbl <- tibble(
+  x = numeric(), y_pred = numeric(), variable = character(), outcome = character(),
+  mode = character(), predictor_set_name = character(), qc_variant = character(),
+  outcome_label = character(), var_label = character()
+)
+
+omar_model_summary <- as_tbl(reticulate::py_to_r(py$omar_model_rows))
+if (nrow(omar_model_summary) > 0) {
+  omar_model_summary <- omar_model_summary %>%
+    transmute(
+      outcome = outcome,
+      mode = mode,
+      predictor_set_name = predictor_set_name,
+      qc_variant = qc_variant,
+      n_complete = as.integer(n_complete),
+      n = as.integer(n),
+      r2 = as.numeric(r2),
+      adj_r2 = as.numeric(adj_r2),
+      aic = as.numeric(aic),
+      bic = as.numeric(bic),
+      n_predictors = as.integer(n_predictors),
+      clinical_knots_protected = as.logical(clinical_knots_protected),
+      outcome_label = outcome_label_map[outcome]
+    )
+} else {
+  omar_model_summary <- tibble()
+}
+
+omar_threshold_summary <- as_tbl(reticulate::py_to_r(py$omar_threshold_rows)) %>%
+  left_join(ase_cutoffs_hcm, by = "variable") %>%
+  mutate(
+    outcome_label = outcome_label_map[outcome],
+    var_label = recode(variable, !!!as.list(omar_var_labels), .default = variable),
+    delta_vs_ase = knot - ase_cutoff
+  )
+if (nrow(omar_threshold_summary) == 0) omar_threshold_summary <- empty_threshold_tbl
+
+omar_importance_summary <- as_tbl(reticulate::py_to_r(py$omar_importance_rows)) %>%
+  mutate(
+    outcome_label = outcome_label_map[outcome],
+    var_label = recode(variable, !!!as.list(omar_var_labels), .default = variable)
+  )
+
+omar_pd_all <- as_tbl(reticulate::py_to_r(py$omar_partial_rows)) %>%
+  mutate(
+    outcome_label = outcome_label_map[outcome],
+    var_label = recode(variable, !!!as.list(omar_var_labels), .default = variable)
+  )
+if (nrow(omar_pd_all) == 0) omar_pd_all <- empty_pd_tbl
+
+omar_qc_summary <- as_tbl(reticulate::py_to_r(py$omar_qc_rows))
+omar_bootstrap_summary <- as_tbl(reticulate::py_to_r(py$omar_bootstrap_rows))
+
+omar_primary_models <- omar_model_summary %>%
+  filter(qc_variant == "complete_case", predictor_set_name == "heart_bmi_primary")
+
+omar_primary_thresholds <- omar_threshold_summary %>%
+  filter(qc_variant == "complete_case", predictor_set_name == "heart_bmi_primary")
+
+omar_primary_importance <- omar_importance_summary %>%
+  filter(qc_variant == "complete_case", predictor_set_name == "heart_bmi_primary")
+
+omar_focus_variables <- unique(c(
+  if (exists("rcs_focus_indices")) rcs_focus_indices else character(),
+  omar_primary_thresholds %>% filter(outcome == "VeVco2_slope") %>% pull(variable),
+  omar_primary_importance %>%
+    filter(outcome == "VeVco2_slope", variable %in% c("la_vol_index", "tr_max_vel", "med_peak_e_vel", "lv_septal_thickness", "e_e_ave")) %>%
+    arrange(desc(metric_drop)) %>%
+    slice_head(n = 3) %>%
+    pull(variable)
+))
+omar_focus_variables <- omar_focus_variables[!is.na(omar_focus_variables) & nzchar(omar_focus_variables)]
+if (length(omar_focus_variables) == 0) omar_focus_variables <- "la_vol_index"
+
+omar_pd_focus <- omar_pd_all %>%
+  filter(
+    qc_variant == "complete_case",
+    predictor_set_name == "heart_bmi_primary",
+    mode %in% c("mars", "additive"),
+    variable %in% omar_focus_variables
+  )
+```
+
+```{r omar_export, results='asis'}
+dir.create("../Manuscript/Supplemental", showWarnings = FALSE, recursive = TRUE)
+
+if (nrow(omar_model_summary) > 0) {
+  omar_model_export <- omar_model_summary %>%
+    mutate(
+      r2 = round(r2, 3),
+      adj_r2 = round(adj_r2, 3),
+      aic = round(aic, 1),
+      bic = round(bic, 1)
+    )
+  write.csv(omar_model_export, "../2_Output/Table_S1_OMARX_ModelPerformance.csv", row.names = FALSE)
+  write.csv(omar_model_export, "../Manuscript/Supplemental/Table_S1_OMARX_ModelPerformance.csv", row.names = FALSE)
+}
+
+if (nrow(omar_threshold_summary) > 0) {
+  omar_threshold_export <- omar_threshold_summary %>%
+    mutate(across(c(knot, ase_cutoff, delta_vs_ase, max_abs_coefficient), ~ round(., 3)))
+  write.csv(omar_threshold_export, "../2_Output/Table_S2_OMARX_Thresholds.csv", row.names = FALSE)
+  write.csv(omar_threshold_export, "../Manuscript/Supplemental/Table_S2_OMARX_Thresholds.csv", row.names = FALSE)
+}
+
+if (nrow(omar_importance_summary) > 0) {
+  omar_importance_export <- omar_importance_summary %>%
+    mutate(across(c(metric_standalone, metric_drop, pct_drop), ~ round(., 3)))
+  write.csv(omar_importance_export, "../2_Output/Table_S3_OMARX_VariableImportance.csv", row.names = FALSE)
+  write.csv(omar_importance_export, "../Manuscript/Supplemental/Table_S3_OMARX_VariableImportance.csv", row.names = FALSE)
+}
+
+if (nrow(omar_qc_summary) > 0) {
+  write.csv(omar_qc_summary, "../2_Output/Table_S4_OMARX_QC.csv", row.names = FALSE)
+  write.csv(omar_qc_summary, "../Manuscript/Supplemental/Table_S4_OMARX_QC.csv", row.names = FALSE)
+}
+
+if (nrow(omar_bootstrap_summary) > 0) {
+  write.csv(omar_bootstrap_summary, "../2_Output/Table_S5_OMARX_BootstrapStability.csv", row.names = FALSE)
+  write.csv(omar_bootstrap_summary, "../Manuscript/Supplemental/Table_S5_OMARX_BootstrapStability.csv", row.names = FALSE)
+}
+
+omar_publication_summary <- omar_primary_models %>%
+  mutate(
+    dominant_variables = vapply(outcome, function(outcome_key) {
+      omar_primary_importance %>%
+        filter(outcome == outcome_key) %>%
+        arrange(desc(metric_drop)) %>%
+        slice_head(n = 3) %>%
+        pull(var_label) %>%
+        paste(collapse = ", ")
+    }, character(1)),
+    retained_knots = vapply(outcome, function(outcome_key) {
+      th <- omar_primary_thresholds %>% filter(outcome == outcome_key, mode == "mars")
+      if (nrow(th) == 0) return("None retained")
+      paste0(
+        th$var_label, ": ",
+        number(th$knot, accuracy = 0.1),
+        " (ASE ", number(th$ase_cutoff, accuracy = 0.1), ")",
+        collapse = "\n"
+      )
+    }, character(1)),
+    `Model` = paste0(str_to_title(mode), " | ", predictor_set_name),
+    `Outcome` = outcome_label,
+    `N` = n,
+    `R²` = number(r2, accuracy = 0.001),
+    `Adj R²` = number(adj_r2, accuracy = 0.001),
+    `AIC` = number(aic, accuracy = 0.1),
+    `Dominant variables` = dominant_variables,
+    `Retained knots vs ASE` = retained_knots
+  ) %>%
+  select(`Outcome`, `Model`, `N`, `R²`, `Adj R²`, `AIC`, `Dominant variables`, `Retained knots vs ASE`)
+
+if (nrow(omar_publication_summary) > 0) {
+  omar_publication_summary %>%
+    flextable() %>%
+    bold(part = "header") %>%
+    theme_booktabs() %>%
+    align(j = c("Outcome", "Model", "Dominant variables", "Retained knots vs ASE"), align = "left", part = "all") %>%
+    autofit() %>%
+    save_as_docx(path = "../2_Output/Table_S6_OMARX_Summary.docx")
+}
+```
+
+```{r omar_publication_figure_prepare, include=FALSE}
+lvot_plot_raw <- if ("lvot_gradient_cont" %in% names(baseline_df)) {
+  baseline_df$lvot_gradient_cont
+} else if ("lvot_max_gradient" %in% names(baseline_df)) {
+  baseline_df$lvot_max_gradient
+} else {
+  rep(NA_real_, nrow(baseline_df))
+}
+
+sex_plot_raw <- if ("Sex_num" %in% names(baseline_df)) {
+  baseline_df$Sex_num
+} else {
+  ifelse(as.character(baseline_df$Sex) == "Female", 1, 0)
+}
+
+omar_primary_predictors_r <- c(
+  "e_e_ave", "la_vol_index", "tr_max_vel", "med_peak_e_vel",
+  "lv_septal_thickness", "lvot_gradient_cont", "age", "BMI", "Sex_num"
+)
+
+omar_plot_source <- baseline_df %>%
+  mutate(
+    e_e_ave = suppressWarnings(as.numeric(e_e_ave)),
+    la_vol_index = suppressWarnings(as.numeric(la_vol_index)),
+    tr_max_vel = suppressWarnings(as.numeric(tr_max_vel)),
+    med_peak_e_vel = suppressWarnings(as.numeric(med_peak_e_vel)),
+    lv_septal_thickness = suppressWarnings(as.numeric(lv_septal_thickness)),
+    age = suppressWarnings(as.numeric(age)),
+    BMI = suppressWarnings(as.numeric(BMI)),
+    Sex_num = suppressWarnings(as.numeric(sex_plot_raw)),
+    lvot_gradient_cont = suppressWarnings(as.numeric(lvot_plot_raw))
+  ) %>%
+  mutate(
+    e_e_ave = ifelse(!is.na(e_e_ave) & e_e_ave > 30, NA_real_, e_e_ave),
+    med_peak_e_vel = ifelse(!is.na(med_peak_e_vel) & med_peak_e_vel > 30, NA_real_, med_peak_e_vel),
+    tr_max_vel = ifelse(!is.na(tr_max_vel) & tr_max_vel > 400, NA_real_, tr_max_vel),
+    lvot_gradient_cont = ifelse(!is.na(lvot_gradient_cont) & lvot_gradient_cont < 0, 0, lvot_gradient_cont),
+    VO2_FRIEND2_PP = suppressWarnings(as.numeric(VO2_FRIEND2_PP)),
+    VeVco2_slope = suppressWarnings(as.numeric(VeVco2_slope))
+  )
+
+omar_complete_ve <- omar_plot_source %>%
+  filter(if_all(all_of(c(omar_primary_predictors_r, "VeVco2_slope")), ~ !is.na(.x)))
+
+omar_plot_importance <- omar_primary_importance %>%
+  filter(mode == "mars", outcome %in% c("VO2_FRIEND2_PP", "VeVco2_slope")) %>%
+  mutate(
+    plot_fill = case_when(
+      outcome == "VO2_FRIEND2_PP" & variable == "age" ~ jacc_cols["navy"],
+      outcome == "VO2_FRIEND2_PP" & variable == "BMI" ~ jacc_cols["blue"],
+      outcome == "VeVco2_slope" & variable == "la_vol_index" ~ jacc_cols["red"],
+      outcome == "VeVco2_slope" & variable %in% c("med_peak_e_vel", "Sex_num", "age", "lv_septal_thickness") ~ jacc_cols["orange"],
+      TRUE ~ alpha(jacc_cols["gray"], 0.75)
+    )
+  )
+
+omar_vo2_importance_plot <- omar_plot_importance %>%
+  filter(outcome == "VO2_FRIEND2_PP") %>%
+  arrange(pct_drop) %>%
+  mutate(var_label = factor(var_label, levels = var_label))
+
+omar_ve_importance_plot <- omar_plot_importance %>%
+  filter(outcome == "VeVco2_slope") %>%
+  arrange(pct_drop) %>%
+  mutate(var_label = factor(var_label, levels = var_label))
+
+omar_vo2_n <- omar_primary_models %>%
+  filter(outcome == "VO2_FRIEND2_PP", mode == "mars") %>%
+  pull(n) %>%
+  first()
+if (length(omar_vo2_n) == 0 || is.na(omar_vo2_n)) omar_vo2_n <- nrow(omar_plot_source)
+
+omar_ve_n <- omar_primary_models %>%
+  filter(outcome == "VeVco2_slope", mode == "mars") %>%
+  pull(n) %>%
+  first()
+if (length(omar_ve_n) == 0 || is.na(omar_ve_n)) omar_ve_n <- nrow(omar_complete_ve)
+
+omar_lavi_pd <- omar_pd_all %>%
+  filter(
+    outcome == "VeVco2_slope",
+    variable == "la_vol_index",
+    mode %in% c("mars", "additive"),
+    predictor_set_name == "heart_bmi_primary",
+    qc_variant == "complete_case"
+  ) %>%
+  mutate(
+    mode_label = recode(mode, mars = "OMARX MARS", additive = "Confirmatory additive")
+  )
+
+omar_lavi_label_points <- omar_lavi_pd %>%
+  group_by(mode_label) %>%
+  slice_max(order_by = x, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+omar_lavi_primary_knot <- omar_primary_thresholds %>%
+  filter(outcome == "VeVco2_slope", mode == "mars", variable == "la_vol_index") %>%
+  slice_head(n = 1)
+
+omar_lavi_qc_plot <- omar_threshold_summary %>%
+  filter(
+    outcome == "VeVco2_slope",
+    variable == "la_vol_index",
+    mode == "mars",
+    qc_variant %in% c(
+      "complete_case",
+      "lbmi_sensitivity",
+      "binary_lvot_sensitivity",
+      "imputed_predictors",
+      "clinical_knot_sensitivity"
+    )
+  ) %>%
+  transmute(
+    analysis = recode(
+      qc_variant,
+      complete_case = "Primary BMI-adjusted",
+      lbmi_sensitivity = "LBMI sensitivity",
+      binary_lvot_sensitivity = "Binary LVOT sensitivity",
+      imputed_predictors = "Imputed predictors",
+      clinical_knot_sensitivity = "Protected clinical-knot sensitivity"
+    ),
+    knot = as.numeric(knot),
+    lo = as.numeric(knot),
+    hi = as.numeric(knot),
+    label = number(knot, accuracy = 0.1),
+    point_fill = case_when(
+      analysis == "Primary BMI-adjusted" ~ jacc_cols["red"],
+      analysis == "Protected clinical-knot sensitivity" ~ jacc_cols["navy"],
+      TRUE ~ jacc_cols["orange"]
+    )
+  )
+
+if (nrow(omar_bootstrap_summary) > 0) {
+  omar_lavi_qc_plot <- bind_rows(
+    omar_lavi_qc_plot,
+    omar_bootstrap_summary %>%
+      filter(outcome == "VeVco2_slope", variable == "la_vol_index") %>%
+      transmute(
+        analysis = "Bootstrap median [IQR]",
+        knot = as.numeric(median_knot),
+        lo = as.numeric(iqr_low),
+        hi = as.numeric(iqr_high),
+        label = paste0(
+          number(median_knot, accuracy = 0.1),
+          " [",
+          number(iqr_low, accuracy = 0.1),
+          ", ",
+          number(iqr_high, accuracy = 0.1),
+          "]"
+        ),
+        point_fill = jacc_cols["navy"]
+      )
+  )
+}
+
+omar_lavi_qc_levels <- c(
+  "Primary BMI-adjusted",
+  "LBMI sensitivity",
+  "Binary LVOT sensitivity",
+  "Imputed predictors",
+  "Protected clinical-knot sensitivity",
+  "Bootstrap median [IQR]"
+)
+
+omar_lavi_qc_plot <- omar_lavi_qc_plot %>%
+  filter(analysis %in% omar_lavi_qc_levels) %>%
+  mutate(
+    analysis = factor(analysis, levels = rev(omar_lavi_qc_levels))
+  )
+```
+
+```{r omar_publication_figure, fig.width=7.0, fig.height=6.4, out.width='100%'}
+if (nrow(omar_vo2_importance_plot) > 0 && nrow(omar_ve_importance_plot) > 0) {
+  vo2_xmax <- max(omar_vo2_importance_plot$pct_drop, na.rm = TRUE) * 1.18
+  ve_xmax <- max(omar_ve_importance_plot$pct_drop, na.rm = TRUE) * 1.18
+  vo2_subtitle <- str_wrap(
+    paste0("BMI-adjusted MARS, n = ", omar_vo2_n, "; no retained primary diastolic knot"),
+    width = 38
+  )
+  ve_subtitle <- str_wrap(
+    paste0(
+      "BMI-adjusted MARS, n = ", omar_ve_n,
+      "; LAVI dominated the model and retained a knot near ASE 34"
+    ),
+    width = 38
+  )
+
+  p_omar_vo2 <- ggplot(omar_vo2_importance_plot, aes(x = pct_drop, y = var_label)) +
+    geom_col(aes(fill = plot_fill), width = 0.7, color = "black", linewidth = 0.2) +
+    geom_text(
+      aes(label = paste0(number(pct_drop, accuracy = 0.1), "%")),
+      hjust = -0.05, size = 2.5, color = "black"
+    ) +
+    scale_fill_identity() +
+    scale_x_continuous(
+      limits = c(0, vo2_xmax),
+      expand = expansion(mult = c(0, 0.02))
+    ) +
+    labs(
+      title = bquote(bold("Peak " * VO[2] * " OMARX Model")),
+      subtitle = vo2_subtitle,
+      x = "Drop in model fit (%)",
+      y = NULL
+    ) +
+    theme_jacc(base_size = 8.5) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(hjust = 0),
+      plot.subtitle = element_text(hjust = 0, size = 7.1, lineheight = 0.95),
+      axis.text.y = element_text(size = 6.6, lineheight = 0.92),
+      plot.margin = margin(4, 8, 4, 4)
+    )
+
+  p_omar_ve <- ggplot(omar_ve_importance_plot, aes(x = pct_drop, y = var_label)) +
+    geom_col(aes(fill = plot_fill), width = 0.7, color = "black", linewidth = 0.2) +
+    geom_text(
+      aes(label = paste0(number(pct_drop, accuracy = 0.1), "%")),
+      hjust = -0.05, size = 2.5, color = "black"
+    ) +
+    scale_fill_identity() +
+    scale_x_continuous(
+      limits = c(0, ve_xmax),
+      expand = expansion(mult = c(0, 0.02))
+    ) +
+    labs(
+      title = bquote(bold(VE/VCO[2] ~ " OMARX Model")),
+      subtitle = ve_subtitle,
+      x = "Drop in model fit (%)",
+      y = NULL
+    ) +
+    theme_jacc(base_size = 8.5) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(hjust = 0),
+      plot.subtitle = element_text(hjust = 0, size = 7.1, lineheight = 0.95),
+      axis.text.y = element_text(size = 6.6, lineheight = 0.92),
+      plot.margin = margin(4, 8, 4, 4)
+    )
+
+  if (nrow(omar_lavi_pd) > 0) {
+    label_nudge <- diff(range(omar_lavi_pd$y_pred, na.rm = TRUE))
+    if (!is.finite(label_nudge) || label_nudge == 0) label_nudge <- 1
+    label_nudge <- label_nudge * 0.06
+
+    omar_lavi_label_points <- omar_lavi_label_points %>%
+      mutate(
+        label_y = y_pred + c(label_nudge, -label_nudge)[seq_len(n())]
+      )
+
+    knot_text <- if (nrow(omar_lavi_primary_knot) > 0) {
+      str_wrap(
+        paste0(
+          "OMARX knot = ",
+          number(omar_lavi_primary_knot$knot[1], accuracy = 0.1),
+          " mL/m",
+          "\u00B2",
+          "; ASE = 34.0"
+        ),
+        width = 38
+      )
+    } else {
+      str_wrap("ASE reference = 34.0 mL/m²", width = 38)
+    }
+
+    p_omar_lavi <- ggplot() +
+      geom_point(
+        data = omar_complete_ve,
+        aes(x = la_vol_index, y = VeVco2_slope),
+        color = alpha(jacc_cols["gray"], 0.45),
+        size = 1.15,
+        shape = 16
+      ) +
+      geom_rug(
+        data = omar_complete_ve,
+        aes(x = la_vol_index),
+        sides = "b",
+        color = alpha(jacc_cols["gray"], 0.35),
+        alpha = 0.35,
+        linewidth = 0.15
+      ) +
+      geom_line(
+        data = omar_lavi_pd,
+        aes(x = x, y = y_pred, color = mode_label),
+        linewidth = 0.95
+      ) +
+      geom_vline(
+        xintercept = 34,
+        color = jacc_cols["blue"],
+        linetype = "dashed",
+        linewidth = 0.5
+      ) +
+      {if (nrow(omar_lavi_primary_knot) > 0) {
+        geom_vline(
+          xintercept = omar_lavi_primary_knot$knot[1],
+          color = jacc_cols["red"],
+          linewidth = 0.55
+        )
+      }} +
+      geom_label(
+        data = omar_lavi_label_points,
+        aes(x = x, y = label_y, label = mode_label, fill = mode_label),
+        label.size = 0,
+        size = 2.5,
+        label.padding = unit(0.12, "lines"),
+        show.legend = FALSE
+      ) +
+      scale_color_manual(
+        values = c(
+          "OMARX MARS" = jacc_cols["orange"],
+          "Confirmatory additive" = jacc_cols["gray"]
+        )
+      ) +
+      scale_fill_manual(
+        values = c(
+          "OMARX MARS" = alpha(jacc_cols["orange"], 0.16),
+          "Confirmatory additive" = alpha(jacc_cols["gray"], 0.16)
+        )
+      ) +
+      labs(
+        title = bquote(bold("LAVI Partial Effect for VE/VCO" [2])),
+        subtitle = knot_text,
+        x = bquote("LAVI, mL/" * m^2),
+        y = "Predicted VE/VCO2 slope"
+      ) +
+      coord_cartesian(clip = "off") +
+      theme_jacc(base_size = 8.5) +
+      theme(
+        legend.position = "none",
+        plot.title = element_text(hjust = 0),
+        plot.subtitle = element_text(hjust = 0, size = 7.1, lineheight = 0.95),
+        axis.title.y = element_text(margin = margin(r = 3)),
+        plot.margin = margin(4, 20, 4, 2)
+      )
+  } else {
+    p_omar_lavi <- ggplot() +
+      annotate("text", x = 0.5, y = 0.5, label = "LAVI partial-effect data unavailable") +
+      theme_void()
+  }
+
+  if (nrow(omar_lavi_qc_plot) > 0) {
+    qc_xmax <- max(c(34, omar_lavi_qc_plot$hi), na.rm = TRUE) + 1.15
+    qc_xmin <- min(c(34, omar_lavi_qc_plot$lo), na.rm = TRUE) - 1.15
+    bootstrap_note <- if (nrow(omar_bootstrap_summary) > 0) {
+      str_wrap(
+        paste0(
+          "Bootstrap LAVI retention frequency = ",
+          percent(omar_bootstrap_summary$retention_frequency[1], accuracy = 0.1)
+        ),
+        width = 38
+      )
+    } else {
+      str_wrap("Dashed blue line denotes ASE LAVI 34 mL/m²", width = 38)
+    }
+
+    p_omar_qc <- ggplot(omar_lavi_qc_plot, aes(x = knot, y = analysis)) +
+      geom_vline(xintercept = 34, color = jacc_cols["blue"], linetype = "dashed", linewidth = 0.5) +
+      geom_segment(
+        aes(x = lo, xend = hi, yend = analysis),
+        linewidth = 1.4,
+        color = alpha(jacc_cols["navy"], 0.55)
+      ) +
+      geom_point(
+        aes(fill = point_fill),
+        shape = 21,
+        size = 2.7,
+        stroke = 0.35,
+        color = "black",
+        show.legend = FALSE
+      ) +
+      geom_text(
+        aes(x = hi + 0.18, label = label),
+        hjust = 0,
+        size = 2.45,
+        color = "black"
+      ) +
+      scale_fill_identity() +
+      scale_x_continuous(
+        limits = c(qc_xmin, qc_xmax),
+        expand = expansion(mult = c(0, 0))
+      ) +
+      labs(
+        title = "LAVI Threshold Robustness",
+        subtitle = bootstrap_note,
+        x = bquote("LAVI threshold, mL/" * m^2),
+        y = NULL
+      ) +
+      coord_cartesian(clip = "off") +
+      theme_jacc(base_size = 8.5) +
+      theme(
+        legend.position = "none",
+        plot.title = element_text(hjust = 0),
+        plot.subtitle = element_text(hjust = 0, size = 7.1, lineheight = 0.95),
+        axis.text.y = element_text(size = 6.4, lineheight = 0.92),
+        plot.margin = margin(4, 34, 4, 4)
+      )
+  } else {
+    p_omar_qc <- ggplot() +
+      annotate("text", x = 0.5, y = 0.5, label = "LAVI threshold QC unavailable") +
+      theme_void()
+  }
+
+  fig_omar_publication <- (p_omar_vo2 | p_omar_ve) / (p_omar_lavi | p_omar_qc) +
+    plot_annotation(tag_levels = "A", tag_prefix = "(", tag_suffix = ")") &
+    theme(plot.tag = element_text(face = "bold", size = 11))
+
+  show_and_save_jacc(fig_omar_publication, "../2_Output/Figure_S2_OMARX_ClinicalSummary.pdf", w = 7.0, h = 6.4)
+  save_jacc(fig_omar_publication, "../Manuscript/Supplemental/Figure_S2_OMARX_ClinicalSummary.pdf", w = 7.0, h = 6.4)
+} else {
+  ggplot() +
+    annotate("text", x = 0.5, y = 0.5, label = "OMARX publication figure unavailable") +
+    theme_void()
+}
+```
+
+**Legend.** Publication-format summary of the revised OMARX analysis. **(A)** Variable-importance profile for the BMI-adjusted OMARX MARS model of Peak VO$_2$, showing dominant contributions from age and BMI and no retained primary diastolic knot. **(B)** Variable-importance profile for the corresponding VE/VCO$_2$ model, highlighting LAVI as the dominant predictor with supplementary contributions from age, sex, medial septal e$'$, and septal thickness. **(C)** OMARX partial-effect plot for LAVI in the VE/VCO$_2$ model, with raw complete-case observations in the background, the primary retained OMARX knot shown as a solid red line, and the ASE reference value of 34 mL/m$^2$ shown as a dashed blue line. **(D)** Robustness of the VE/VCO$_2$ LAVI threshold across prespecified sensitivity analyses and bootstrap quality control. Segment ranges denote the bootstrap interquartile range where applicable.
+
+```{r omar_figure, fig.width=6.9, fig.height=5.9, out.width='100%'}
+if (nrow(omar_pd_focus) > 0) {
+  omar_threshold_focus <- omar_primary_thresholds %>%
+    filter(mode == "mars", variable %in% omar_focus_variables)
+
+  fig_omar <- ggplot(omar_pd_focus, aes(x = x, y = y_pred, color = mode)) +
+    geom_line(linewidth = 0.9) +
+    {if (nrow(omar_threshold_focus) > 0) {
+      geom_vline(
+        data = omar_threshold_focus,
+        aes(xintercept = knot),
+        color = jacc_cols["red"],
+        linewidth = 0.5,
+        inherit.aes = FALSE
+      )
+    }} +
+    geom_vline(
+      data = omar_pd_focus %>%
+        distinct(outcome, variable, outcome_label, var_label) %>%
+        left_join(ase_cutoffs_hcm, by = "variable"),
+      aes(xintercept = ase_cutoff),
+      color = jacc_cols["blue"],
+      linetype = "dashed",
+      linewidth = 0.45,
+      inherit.aes = FALSE
+    ) +
+    scale_color_manual(values = c("additive" = jacc_cols["gray"], "mars" = jacc_cols["navy"])) +
+    facet_grid(outcome_label ~ var_label, scales = "free_x") +
+    labs(
+      title = "OMARX Partial-Effect Plots for Retained and Clinically Relevant Heart Predictors",
+      subtitle = "MARS discovery (navy) vs additive confirmation (gray); red = retained OMARX knot; dashed blue = ASE cutoff",
+      x = NULL,
+      y = "Predicted outcome",
+      color = NULL
+    ) +
+    theme_jacc() +
+    theme(
+      strip.text = element_text(size = 7),
+      legend.position = "bottom"
+    )
+
+  show_and_save_jacc(fig_omar, "../2_Output/Figure_S3_OMARX_Thresholds.pdf", w = 6.9, h = 5.9)
+  save_jacc(fig_omar, "../Manuscript/Supplemental/Figure_S3_OMARX_Thresholds.pdf", w = 6.9, h = 5.9)
+} else {
+  ggplot() +
+    annotate("text", x = 0.5, y = 0.5, label = "OMARX partial-effect data unavailable") +
+    theme_void()
+}
+```
+
+**Legend.** OMARX partial-effect plots for the retained and clinically relevant heart predictors from the primary complete-case BMI-adjusted models. Navy curves show the primary MARS discovery fit and gray curves show the confirmatory additive fit. Solid red vertical lines denote retained OMARX knots from the MARS fit, and dashed blue lines denote ASE reference thresholds where available.
+
+```{r omar_rcs_comparison, fig.width=6.9, fig.height=5.6, out.width='100%'}
+center_curve_df <- function(df, ref_x = NA_real_, y_col = "y", lo_col = NULL, hi_col = NULL) {
+  df <- df %>% arrange(x)
+  keep <- is.finite(df$x) & is.finite(df[[y_col]])
+  work <- df[keep, , drop = FALSE]
+  if (nrow(work) < 2) return(df)
+  x_rng <- range(work$x, na.rm = TRUE)
+  if (is.na(ref_x) || ref_x < x_rng[1] || ref_x > x_rng[2]) {
+    ref_x <- median(work$x, na.rm = TRUE)
+  }
+  ref_y <- approx(work$x, work[[y_col]], xout = ref_x, rule = 2, ties = mean)$y
+  df$y_centered <- df[[y_col]] - ref_y
+  if (!is.null(lo_col)) df$lo_centered <- df[[lo_col]] - ref_y
+  if (!is.null(hi_col)) df$hi_centered <- df[[hi_col]] - ref_y
+  df
+}
+
+if (nrow(omar_pd_focus) > 0 && exists("pp_all") && exists("pp_vevco2")) {
+  rcs_source <- bind_rows(
+    pp_all %>%
+      transmute(outcome = "VO2_FRIEND2_PP", variable = var, x, y = fit, lo, hi, ase_cutoff, var_label = label, outcome_label = outcome_label_map["VO2_FRIEND2_PP"]),
+    pp_vevco2 %>%
+      transmute(outcome = "VeVco2_slope", variable = var, x, y = fit, lo, hi, ase_cutoff, var_label = label, outcome_label = outcome_label_map["VeVco2_slope"])
+  ) %>%
+    filter(variable %in% omar_focus_variables) %>%
+    mutate(method = "RCS")
+
+  rcs_compare <- bind_rows(lapply(
+    split(rcs_source, interaction(rcs_source$outcome, rcs_source$variable, drop = TRUE)),
+    function(df) center_curve_df(df, ref_x = df$ase_cutoff[which(!is.na(df$ase_cutoff))[1]], y_col = "y", lo_col = "lo", hi_col = "hi")
+  ))
+
+  omar_compare <- omar_pd_focus %>%
+    filter(mode == "mars") %>%
+    transmute(outcome, outcome_label, variable, var_label, x, y = y_pred) %>%
+    left_join(ase_cutoffs_hcm, by = "variable") %>%
+    group_split(outcome, variable) %>%
+    lapply(function(df) center_curve_df(df, ref_x = df$ase_cutoff[which(!is.na(df$ase_cutoff))[1]], y_col = "y")) %>%
+    bind_rows()
+
+  ase_lines <- bind_rows(rcs_compare, omar_compare) %>%
+    distinct(outcome, outcome_label, variable, var_label, ase_cutoff) %>%
+    filter(!is.na(ase_cutoff))
+
+  knot_lines <- omar_primary_thresholds %>%
+    filter(mode == "mars", variable %in% omar_focus_variables)
+
+  fig_omar_compare <- ggplot() +
+    geom_ribbon(
+      data = rcs_compare,
+      aes(x = x, ymin = lo_centered, ymax = hi_centered),
+      fill = jacc_cols["blue"],
+      alpha = 0.14
+    ) +
+    geom_line(
+      data = rcs_compare,
+      aes(x = x, y = y_centered, color = "RCS"),
+      linewidth = 0.95
+    ) +
+    geom_line(
+      data = omar_compare,
+      aes(x = x, y = y_centered, color = "OMARX"),
+      linewidth = 0.95
+    ) +
+    geom_vline(
+      data = ase_lines,
+      aes(xintercept = ase_cutoff, linetype = "ASE cutoff"),
+      color = jacc_cols["blue"],
+      linewidth = 0.5,
+      show.legend = TRUE
+    ) +
+    {if (nrow(knot_lines) > 0) {
+      geom_vline(
+        data = knot_lines,
+        aes(xintercept = knot, linetype = "OMARX knot"),
+        color = jacc_cols["red"],
+        linewidth = 0.5,
+        show.legend = TRUE
+      )
+    }} +
+    facet_grid(outcome_label ~ var_label, scales = "free_x") +
+    scale_color_manual(values = c("RCS" = jacc_cols["navy"], "OMARX" = jacc_cols["orange"])) +
+    scale_linetype_manual(values = c("ASE cutoff" = "dashed", "OMARX knot" = "solid")) +
+    labs(
+      title = "Focused RCS vs OMARX Comparison",
+      subtitle = "Comparison restricted to predictors prioritized by the revised linearity screen and OMARX QC",
+      x = NULL,
+      y = "Centered predicted outcome",
+      color = NULL,
+      linetype = NULL
+    ) +
+    theme_jacc() +
+    theme(
+      strip.text = element_text(size = 7),
+      legend.position = "bottom"
+    )
+
+  show_and_save_jacc(fig_omar_compare, "../2_Output/Figure_S4_OMARX_vs_RCS.pdf", w = 6.9, h = 5.6)
+  save_jacc(fig_omar_compare, "../Manuscript/Supplemental/Figure_S4_OMARX_vs_RCS.pdf", w = 6.9, h = 5.6)
+} else {
+  ggplot() +
+    annotate("text", x = 0.5, y = 0.5, label = "OMARX-to-RCS comparison unavailable") +
+    theme_void()
+}
+```
+
+**Legend.** Direct comparison of the revised focused RCS curves and the primary OMARX MARS partial-effect curves for the predictors that survive the linearity screen and OMARX QC prioritization. Dashed blue vertical lines indicate ASE cutoffs and solid red vertical lines indicate retained OMARX knots.
+
+## OMARX Results
+
+```{r omar_results_text, results='asis'}
+if (nrow(omar_primary_models) == 0) {
+  cat("OMARX models did not yield analyzable results in the available cross-sectional cohort.\n")
+} else {
+  peak_top <- omar_primary_importance %>%
+    filter(outcome == "VO2_FRIEND2_PP", mode == "mars") %>%
+    arrange(desc(metric_drop)) %>%
+    slice_head(n = 3)
+
+  ve_top <- omar_primary_importance %>%
+    filter(outcome == "VeVco2_slope", mode == "mars") %>%
+    arrange(desc(metric_drop)) %>%
+    slice_head(n = 4)
+
+  peak_sentence <- paste0(
+    "For Peak VO$_2$, the primary complete-case BMI-adjusted MARS model emphasized ",
+    paste(peak_top$var_label, collapse = ", "),
+    ", consistent with the interpretation that age and body-size structure dominate this outcome more strongly than diastolic threshold structure."
+  )
+
+  ve_knots <- omar_primary_thresholds %>%
+    filter(outcome == "VeVco2_slope", mode == "mars")
+
+  ve_knot_text <- if (nrow(ve_knots) > 0) {
+    paste0(
+      " Retained MARS knots were identified in ",
+      paste(paste0(ve_knots$var_label, " at ", number(ve_knots$knot, accuracy = 0.1)), collapse = "; "),
+      "."
+    )
+  } else {
+    " No retained MARS knot was identified in the primary VE/VCO$_2$ model."
+  }
+
+  bootstrap_text <- if (nrow(omar_bootstrap_summary) > 0) {
+    paste0(
+      " In bootstrap QC, the LAVI knot was retained in ",
+      percent(omar_bootstrap_summary$retention_frequency[1], accuracy = 0.1),
+      " of resamples, with median knot ",
+      number(omar_bootstrap_summary$median_knot[1], accuracy = 0.1),
+      " mL/m$^2$ and ",
+      percent(omar_bootstrap_summary$pct_within_5_of_34[1], accuracy = 0.1),
+      " of retained knots lying within 5 mL/m$^2$ of 34."
+    )
+  } else {
+    ""
+  }
+
+  ve_sentence <- paste0(
+    "For VE/VCO$_2$ slope, the primary complete-case BMI-adjusted MARS model prioritized ",
+    paste(ve_top$var_label, collapse = ", "),
+    ", supporting a stronger cardiac/diastology signal than was seen for Peak VO$_2$.",
+    ve_knot_text,
+    bootstrap_text
+  )
+
+  cat(paste(peak_sentence, ve_sentence))
+}
+```
+
+# Longitudinal GAMM Analysis
+
+We employ generalized additive mixed models (GAMMs) via `mgcv::bam()` to model nonlinear longitudinal trajectories of peak VO$_2$ and VE/VCO$_2$ slope over time, testing whether the trajectory diverges as a function of baseline diastolic severity via a tensor product interaction.
+
+```{r gamm_analysis, fig.width=7.0, fig.height=3.8}
+# Derive baseline DD Z-score from LAVI GAMLSS model (strongest diastolic predictor)
+# Note: E/e' was non-significant in GAMLSS (beta=0.01, P=0.97); LAVI is used instead
+if (exists("gamlss_results") && "la_vol_index" %in% names(gamlss_results)) {
+  z_source <- gamlss_results[["la_vol_index"]]$data %>%
+    select(ID, dd_zscore = seamlss_z)
+  long_df <- long_df %>%
+    left_join(z_source, by = "ID")
+} else {
+  # Fallback: standardized LAVI
+  long_df <- long_df %>%
+    mutate(dd_zscore = scale(as.numeric(as.character(la_vol_index)))[, 1])
+}
+
+# Filter to patients with DD Z-score and sufficient follow-up
+gamm_df <- long_df %>%
+  filter(!is.na(dd_zscore), !is.na(time_yrs),
+         !is.na(age), !is.na(LBMI), is.finite(time_yrs)) %>%
+  mutate(
+    ID_fac = factor(ID),
+    Sex = factor(Sex)
+  )
+
+cat(sprintf("GAMM cohort: %d observations, %d patients\n",
+            nrow(gamm_df), n_distinct(gamm_df$ID)))
+
+long_palette <- c(
+  "Q1 (lowest DD burden)" = "#C4CBD3",
+  "Q2" = "#8FB3C9",
+  "Q3" = "#D7BE86",
+  "Q4 (highest DD burden)" = "#C88B8B"
+)
+
+empty_gamm_panel <- function(label) {
+  ggplot() +
+    annotate("text", x = 0.5, y = 0.5, label = label, size = 3.3) +
+    theme_void()
+}
+
+fit_gamm_trajectory_panel <- function(data, outcome_var, show_legend = FALSE) {
+  model_df <- data %>%
+    filter(
+      !is.na(.data[[outcome_var]]), !is.na(dd_zscore), !is.na(time_yrs),
+      !is.na(age), !is.na(LBMI), is.finite(time_yrs)
+    ) %>%
+    mutate(
+      ID_fac = factor(ID),
+      Sex = factor(Sex)
+    )
+
+  cat(sprintf(
+    "%s GAMM cohort: %d observations, %d patients\n",
+    outcome_var, nrow(model_df), n_distinct(model_df$ID)
+  ))
+
+  if (nrow(model_df) < 50 || n_distinct(model_df$ID) < 20) {
+    return(NULL)
+  }
+
+  smooth_formula <- as.formula(
+    paste0(
+      outcome_var,
+      " ~ s(time_yrs, bs = 'cr', k = 5) + ",
+      "s(dd_zscore, bs = 'cr', k = 5) + ",
+      "ti(time_yrs, dd_zscore, k = c(4, 4)) + ",
+      "age + Sex + LBMI + s(ID_fac, bs = 're')"
+    )
+  )
+
+  fallback_formula <- as.formula(
+    paste0(
+      outcome_var,
+      " ~ s(time_yrs, bs = 'cr', k = 5) + ",
+      "dd_zscore * time_yrs + age + Sex + LBMI + s(ID_fac, bs = 're')"
+    )
+  )
+
+  fit <- tryCatch({
+    bam(smooth_formula, data = model_df, method = "fREML", discrete = TRUE)
+  }, error = function(e) {
+    message("GAMM failed for ", outcome_var, ", fitting simpler model: ", e$message)
+    bam(fallback_formula, data = model_df, method = "fREML", discrete = TRUE)
+  })
+
+  fit_summary <- summary(fit)
+  smooth_terms <- as_tibble(fit_summary$s.table, rownames = "term")
+  parametric_terms <- as_tibble(fit_summary$p.table, rownames = "term")
+
+  out_stub <- if (outcome_var == "VO2_FRIEND2_PP") "VO2" else "VEVCO2"
+  write.csv(as.data.frame(fit_summary$s.table),
+            paste0("../2_Output/Stats_GAMM_", out_stub, "_SmoothTerms.csv"))
+  write.csv(as.data.frame(fit_summary$p.table),
+            paste0("../2_Output/Stats_GAMM_", out_stub, "_ParametricTerms.csv"))
+
+  dd_group_lookup <- model_df %>%
+    distinct(ID, dd_zscore) %>%
+    mutate(
+      dd_quartile = ntile(dd_zscore, 4),
+      dd_quartile = factor(
+        dd_quartile,
+        levels = 1:4,
+        labels = c("Q1 (lowest DD burden)", "Q2", "Q3", "Q4 (highest DD burden)")
+      )
+    )
+
+  dd_representative <- dd_group_lookup %>%
+    group_by(dd_quartile) %>%
+    summarize(dd_zscore = median(dd_zscore, na.rm = TRUE), .groups = "drop")
+
+  pred_df <- expand_grid(
+    time_yrs = seq(0, min(5, max(model_df$time_yrs, na.rm = TRUE)), by = 0.25),
+    dd_quartile = dd_representative$dd_quartile
+  ) %>%
+    left_join(dd_representative, by = "dd_quartile") %>%
+    mutate(
+      age = median(model_df$age, na.rm = TRUE),
+      Sex = factor(names(which.max(table(model_df$Sex))), levels = levels(model_df$Sex)),
+      LBMI = median(model_df$LBMI, na.rm = TRUE),
+      ID_fac = model_df$ID_fac[1]
+    )
+
+  pred_terms <- predict(
+    fit,
+    newdata = pred_df,
+    exclude = "s(ID_fac)",
+    type = "response",
+    se.fit = TRUE
+  )
+
+  pred_df <- pred_df %>%
+    mutate(
+      fit = pred_terms$fit,
+      se = pred_terms$se.fit,
+      lo = fit - 1.96 * se,
+      hi = fit + 1.96 * se
+    )
+
+  panel_title <- if (outcome_var == "VO2_FRIEND2_PP") {
+    bquote(bold("Peak " * VO[2] * " Trajectories"))
+  } else {
+    bquote(bold("VE/VCO" [2] * " Slope Trajectories"))
+  }
+
+  y_label <- if (outcome_var == "VO2_FRIEND2_PP") {
+    bquote("Predicted Peak " * VO[2] * " (FRIEND 2.0 % Predicted)")
+  } else {
+    "Predicted VE/VCO2 Slope"
+  }
+
+  plot_obj <- ggplot(pred_df, aes(x = time_yrs, y = fit, color = dd_quartile, fill = dd_quartile)) +
+    geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.14, linewidth = 0, show.legend = FALSE) +
+    geom_line(linewidth = 1.05) +
+    scale_color_manual(values = long_palette) +
+    scale_fill_manual(values = long_palette) +
+    labs(
+      title = panel_title,
+      x = "Years from Baseline CPET",
+      y = y_label,
+      color = "Baseline DD Quartile"
+    ) +
+    theme_jacc() +
+    theme(
+      legend.position = if (show_legend) c(0.03, 0.97) else "none",
+      legend.justification = c(0, 1),
+      legend.direction = "vertical",
+      legend.background = element_rect(fill = alpha("white", 0.88), color = "grey70", linewidth = 0.25),
+      legend.key.height = unit(0.28, "cm"),
+      legend.text = element_text(size = 6.7),
+      legend.title = element_text(size = 7.1),
+      legend.margin = margin(3, 4, 3, 4)
+    )
+
+  list(
+    plot = plot_obj,
+    smooth_terms = smooth_terms,
+    parametric_terms = parametric_terms,
+    n_observations = nrow(model_df),
+    n_patients = n_distinct(model_df$ID),
+    outcome = outcome_var
+  )
+}
+
+if (nrow(gamm_df) >= 50 && n_distinct(gamm_df$ID) >= 20) {
+  gamm_vo2_result <- fit_gamm_trajectory_panel(gamm_df, "VO2_FRIEND2_PP", show_legend = FALSE)
+  gamm_vevco2_result <- fit_gamm_trajectory_panel(gamm_df, "VeVco2_slope", show_legend = TRUE)
+
+  p_gamm_vo2 <- if (!is.null(gamm_vo2_result)) gamm_vo2_result$plot else NULL
+  p_gamm_vevco2 <- if (!is.null(gamm_vevco2_result)) gamm_vevco2_result$plot else NULL
+
+  fig4 <- (
+    (if (!is.null(p_gamm_vo2)) p_gamm_vo2 else empty_gamm_panel("Peak VO2 GAMM unavailable")) |
+    (if (!is.null(p_gamm_vevco2)) p_gamm_vevco2 else empty_gamm_panel("VE/VCO2 GAMM unavailable"))
+  ) +
+    plot_annotation(tag_levels = "A", tag_prefix = "(", tag_suffix = ")") &
+    theme(
+      plot.tag = element_text(face = "bold", size = 11)
+    )
+
+  show_and_save_jacc(fig4, "../2_Output/Figure4_Longitudinal_GAMM.pdf", w = 7.0, h = 3.8)
+}
+```
+
+**Figure 4. Longitudinal Model-Derived Cardiopulmonary Trajectories According to Baseline Diastolic Dysfunction Burden.** **(A)** Model-derived peak VO$_2$ trajectories from a generalized additive mixed model across quartiles of baseline diastolic dysfunction burden, defined using the baseline LAVI-derived DD Z-score. **(B)** Model-derived VE/VCO$_2$ slope trajectories across the same quartiles. Shaded bands denote 95% confidence intervals. All models were adjusted for age, sex, and lean body mass index. Abbreviations: CPET = cardiopulmonary exercise testing; DD = diastolic dysfunction; GAMM = generalized additive mixed model; LAVI = left atrial volume index; VE/VCO$_2$ = ventilatory efficiency slope; VO$_2$ = oxygen consumption.
+
+```{r figure4_summary_table, results='asis'}
+figure4_summary_table <- bind_rows(
+  if (exists("gamm_vo2_result") && !is.null(gamm_vo2_result)) {
+    gamm_vo2_result$smooth_terms %>%
+      filter(term %in% c("s(time_yrs)", "s(dd_zscore)", "ti(time_yrs,dd_zscore)")) %>%
+      transmute(
+        Outcome = "Peak VO\u2082 (FRIEND 2.0 % predicted)",
+        `Observations` = gamm_vo2_result$n_observations,
+        `Patients` = gamm_vo2_result$n_patients,
+        `Model component` = recode(
+          term,
+          "s(time_yrs)" = "Time smooth",
+          "s(dd_zscore)" = "Baseline DD smooth",
+          "ti(time_yrs,dd_zscore)" = "Time x DD interaction"
+        ),
+        edf = round(edf, 2),
+        `F statistic` = round(F, 2),
+        `P value` = ifelse(`p-value` < 0.001, "<0.001", sprintf("%.3f", `p-value`)),
+        Interpretation = case_when(
+          term == "ti(time_yrs,dd_zscore)" & `p-value` < 0.05 ~ "Significant trajectory modification",
+          term == "ti(time_yrs,dd_zscore)" ~ "No significant trajectory modification",
+          term == "s(dd_zscore)" & `p-value` < 0.05 ~ "Baseline DD association present",
+          term == "s(time_yrs)" & `p-value` < 0.05 ~ "Nonlinear temporal trend present",
+          TRUE ~ "Not statistically significant"
+        )
+      )
+  },
+  if (exists("gamm_vevco2_result") && !is.null(gamm_vevco2_result)) {
+    gamm_vevco2_result$smooth_terms %>%
+      filter(term %in% c("s(time_yrs)", "s(dd_zscore)", "ti(time_yrs,dd_zscore)")) %>%
+      transmute(
+        Outcome = "VE/VCO\u2082 slope",
+        `Observations` = gamm_vevco2_result$n_observations,
+        `Patients` = gamm_vevco2_result$n_patients,
+        `Model component` = recode(
+          term,
+          "s(time_yrs)" = "Time smooth",
+          "s(dd_zscore)" = "Baseline DD smooth",
+          "ti(time_yrs,dd_zscore)" = "Time x DD interaction"
+        ),
+        edf = round(edf, 2),
+        `F statistic` = round(F, 2),
+        `P value` = ifelse(`p-value` < 0.001, "<0.001", sprintf("%.3f", `p-value`)),
+        Interpretation = case_when(
+          term == "ti(time_yrs,dd_zscore)" & `p-value` < 0.05 ~ "Significant trajectory modification",
+          term == "ti(time_yrs,dd_zscore)" ~ "No significant trajectory modification",
+          term == "s(dd_zscore)" & `p-value` < 0.05 ~ "Baseline DD association present",
+          term == "s(time_yrs)" & `p-value` < 0.05 ~ "Nonlinear temporal trend present",
+          TRUE ~ "Not statistically significant"
+        )
+      )
+  }
+)
+
+figure4_ft <- figure4_summary_table %>%
+  flextable() %>%
+  bold(part = "header") %>%
+  bold(i = ~ `Model component` == "Time x DD interaction", j = c("Model component", "P value", "Interpretation"), bold = TRUE) %>%
+  align(j = c("Outcome", "Model component", "Interpretation"), align = "left", part = "all") %>%
+  border_outer(border = officer::fp_border(color = "black", width = 1)) %>%
+  border_inner_h(border = officer::fp_border(color = "black", width = 0.6), part = "all") %>%
+  border_inner_v(border = officer::fp_border(color = "black", width = 0.6), part = "all") %>%
+  fontsize(size = 9, part = "all") %>%
+  padding(padding = 4, part = "all") %>%
+  set_table_properties(layout = "autofit") %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  set_caption("Table 3. GAMM Summary Supporting Figure 4")
+
+figure4_ft
+
+figure4_summary_table %>%
+  write.csv("../2_Output/Table3_Figure4_GAMM_Summary.csv", row.names = FALSE)
+
+figure4_ft %>%
+  save_as_docx(path = "../2_Output/Table3_Figure4_GAMM_Summary.docx")
+```
+
+# Heart Failure Outcome Analysis
+
+Time-to-event analysis tests whether ASE 2025 filling pressure classification (Normal vs Elevated), continuous DD Z-scores, LVOT gradient, and LV septal thickness predict a composite heart failure endpoint (acute HF, chronic HF, transplant, or death).
+
+```{r hf_outcomes, fig.width=7.0, fig.height=6.8, results='asis'}
+surv_df <- baseline_df %>%
+  filter(!is.na(hf_composite), !is.na(hf_composite_yrs) | hf_composite == 0) %>%
+  mutate(
+    hf_composite_date = as.Date(hf_composite_date_num, origin = "1970-01-01"),
+    event_time_yrs = as.numeric(hf_composite_date - cpx_test_date) / 365.25,
+    censor_time_yrs = as.numeric(as.Date(last_enc_date) - cpx_test_date) / 365.25,
+    lvot_max_gradient_10 = lvot_max_gradient / 10,
+    lv_septal_thickness_0_5 = lv_septal_thickness / 0.5,
+    # Use observed dates rather than raw *_yrs columns, which contain implausible values in the source sheet.
+    follow_up_yrs = case_when(
+      hf_composite == 1 & !is.na(event_time_yrs) & event_time_yrs > 0 ~ event_time_yrs,
+      !is.na(censor_time_yrs) & censor_time_yrs > 0 ~ censor_time_yrs,
+      TRUE ~ NA_real_
+    ),
+    follow_up_yrs = ifelse(is.na(follow_up_yrs) | follow_up_yrs <= 0, 0.01, follow_up_yrs)
+  ) %>%
+  filter(!is.na(follow_up_yrs), follow_up_yrs > 0)
+
+if (!is_gfm_output) {
+  cat(sprintf("Survival cohort: %d patients, %d events\n",
+              nrow(surv_df), sum(surv_df$hf_composite == 1, na.rm = TRUE)))
+}
+
+fig5_palette <- c(
+  reference = "#C4CBD3",
+  highlight = "#C88B8B",
+  forest = "#2F4858",
+  text = "#1F2328",
+  refline = "#B0B8C1"
+)
+
+make_km_panel <- function(data, strata_var, title, labels = c("Normal", "Abnormal"),
+                          inplot_legend = FALSE) {
+  surv_sub <- data %>%
+    filter(!is.na(.data[[strata_var]])) %>%
+    mutate(
+      km_group = factor(
+        ifelse(.data[[strata_var]], labels[2], labels[1]),
+        levels = labels
+      )
+    )
+
+  if (nrow(surv_sub) < 20 || n_distinct(surv_sub$km_group) < 2) {
+    return(NULL)
+  }
+
+  km_fit <- survfit(Surv(follow_up_yrs, hf_composite) ~ km_group, data = surv_sub)
+
+  km_data <- broom::tidy(km_fit) %>%
+    mutate(
+      strata = str_remove(strata, "^km_group="),
+      strata = factor(strata, levels = labels)
+    ) %>%
+    filter(!is.na(strata))
+
+  lr_test <- survdiff(Surv(follow_up_yrs, hf_composite) ~ km_group, data = surv_sub)
+  lr_p <- 1 - pchisq(lr_test$chisq, df = length(lr_test$n) - 1)
+
+  km_colors <- setNames(c(fig5_palette["reference"], fig5_palette["highlight"]), labels)
+
+  p <- ggplot(km_data, aes(x = time, y = estimate, color = strata, fill = strata, group = strata)) +
+    geom_step(linewidth = 0.9) +
+    geom_ribbon(aes(ymin = conf.low, ymax = conf.high),
+                alpha = 0.15, stat = "identity", show.legend = FALSE) +
+    scale_color_manual(values = km_colors, name = NULL) +
+    scale_fill_manual(values = km_colors, guide = "none") +
+    scale_x_continuous(
+      limits = c(0, 10),
+      breaks = seq(0, 10, by = 2),
+      expand = expansion(mult = c(0, 0.02))
+    ) +
+    scale_y_continuous(limits = c(0, 1), labels = percent) +
+    labs(
+      title = title,
+      subtitle = paste0("Log-rank p = ", format.pval(lr_p, digits = 2)),
+      x = "Years from Baseline CPET",
+      y = "Event-Free Survival"
+    ) +
+    theme_jacc(base_size = 8.5) +
+    theme(
+      legend.position = if (inplot_legend) c(0.045, 0.06) else "none",
+      legend.justification = c(0, 0),
+      legend.direction = "vertical",
+      legend.background = element_rect(fill = alpha("white", 0.9), color = "grey75", linewidth = 0.25),
+      legend.key = element_rect(fill = alpha("white", 0), color = NA),
+      legend.margin = margin(3, 5, 3, 5),
+      legend.key.width = unit(0.55, "cm"),
+      legend.key.height = unit(0.28, "cm"),
+      legend.text = element_text(size = 6.8),
+      plot.title = element_text(size = 8.8),
+      plot.subtitle = element_text(size = 7.4),
+      axis.line = element_line(color = fig5_palette["text"], linewidth = 0.35),
+      axis.text = element_text(color = fig5_palette["text"])
+    ) +
+    guides(color = guide_legend(
+      override.aes = list(linewidth = 0.95, alpha = 1),
+      keywidth = unit(0.55, "cm"),
+      keyheight = unit(0.28, "cm")
+    ))
+
+  p
+}
+
+if (nrow(surv_df) >= 30 && sum(surv_df$hf_composite == 1, na.rm = TRUE) >= 5) {
+
+  # Kaplan-Meier panels
+  surv_fp <- surv_df %>%
+    filter(!is.na(fp_class)) %>%
+    mutate(fp_class = factor(fp_class, levels = c("Not Elevated", "Elevated")))
+
+  p_km_ee <- make_km_panel(
+    surv_df, "abn_ee", "E/e' > 14",
+    labels = c("E/e' ≤ 14", "E/e' > 14"),
+    inplot_legend = TRUE
+  )
+  p_km_lavi <- make_km_panel(
+    surv_df, "abn_lavi", "LAVI > 34 mL/m²",
+    labels = c("LAVI ≤ 34", "LAVI > 34"),
+    inplot_legend = TRUE
+  )
+  p_km_trv <- make_km_panel(
+    surv_df, "abn_trv", "TR Vmax > 2.8 m/s",
+    labels = c("TR Vmax ≤ 2.8", "TR Vmax > 2.8"),
+    inplot_legend = TRUE
+  )
+  surv_primary_binary <- surv_df %>%
+    filter(!is.na(hcm_combo_class)) %>%
+    mutate(hcm_primary_abnormal = hcm_combo_n_abnormal > 0)
+
+  p_km_fp <- if (nrow(surv_primary_binary) >= 20 && n_distinct(surv_primary_binary$hcm_primary_abnormal) > 1) {
+    make_km_panel(
+      surv_primary_binary,
+      "hcm_primary_abnormal",
+      "Composite Filling Pressure",
+      labels = c("Normal", "Abnormal"),
+      inplot_legend = TRUE
+    )
+  } else {
+    NULL
+  }
+
+  # Cox proportional hazards: Filling pressure (binary)
+  cox_fp <- tryCatch({
+    coxph(Surv(follow_up_yrs, hf_composite) ~ fp_class + age + Sex + LBMI,
+          data = surv_fp)
+  }, error = function(e) NULL)
+
+  if (!is.null(cox_fp)) {
+    if (!is_gfm_output) {
+      cat("\n**Cox Model: Filling Pressure Classification**\n")
+      tidy(cox_fp, exponentiate = TRUE, conf.int = TRUE) %>%
+        mutate(across(where(is.numeric), ~ round(., 3))) %>%
+        flextable() %>%
+        bold(part = "header") %>%
+        theme_booktabs() %>%
+        autofit() %>%
+        set_caption("Table 3. Cox Proportional Hazards: Composite HF Endpoint") %>%
+        print()
+    }
+
+    write.csv(tidy(cox_fp, exponentiate = TRUE, conf.int = TRUE),
+              "../2_Output/Table3_Cox_FillingPressure.csv", row.names = FALSE)
+
+    # PH assumption check
+    ph_check <- cox.zph(cox_fp)
+    if (!is_gfm_output) {
+      cat(sprintf("\n**Proportional hazards global test p = %.3f**\n", ph_check$table["GLOBAL", "p"]))
+    }
+  }
+
+  # Cox: continuous DD Z-score from LAVI GAMLSS model
+  if (exists("gamlss_results") && "la_vol_index" %in% names(gamlss_results)) {
+    z_src <- gamlss_results[["la_vol_index"]]$data %>% select(ID, dd_zscore = seamlss_z)
+    surv_z <- surv_df %>% left_join(z_src, by = "ID") %>% filter(!is.na(dd_zscore))
+
+    if (nrow(surv_z) >= 20 && sum(surv_z$hf_composite == 1, na.rm = TRUE) >= 5) {
+      cox_z <- coxph(Surv(follow_up_yrs, hf_composite) ~ dd_zscore + age + Sex + LBMI,
+                     data = surv_z)
+      if (!is_gfm_output) {
+        cat("\n**Cox Model: Continuous DD Z-Score**\n")
+        tidy(cox_z, exponentiate = TRUE, conf.int = TRUE) %>%
+          mutate(across(where(is.numeric), ~ round(., 3))) %>%
+          flextable() %>% bold(part = "header") %>% theme_booktabs() %>% autofit() %>% print()
+      }
+
+      write.csv(tidy(cox_z, exponentiate = TRUE, conf.int = TRUE),
+                "../2_Output/Table3_Cox_DDZscore.csv", row.names = FALSE)
+    }
+  }
+
+  surv_lvot <- surv_df %>% filter(!is.na(lvot_max_gradient_10))
+  if (nrow(surv_lvot) >= 20 && sum(surv_lvot$hf_composite == 1, na.rm = TRUE) >= 5) {
+    cox_lvot <- coxph(Surv(follow_up_yrs, hf_composite) ~ lvot_max_gradient_10 + age + Sex + LBMI,
+                      data = surv_lvot)
+    write.csv(tidy(cox_lvot, exponentiate = TRUE, conf.int = TRUE),
+              "../2_Output/Table3_Cox_LVOTgradient.csv", row.names = FALSE)
+  }
+
+  surv_septal <- surv_df %>% filter(!is.na(lv_septal_thickness_0_5))
+  if (nrow(surv_septal) >= 20 && sum(surv_septal$hf_composite == 1, na.rm = TRUE) >= 5) {
+    cox_septal <- coxph(Surv(follow_up_yrs, hf_composite) ~ lv_septal_thickness_0_5 + age + Sex + LBMI,
+                        data = surv_septal)
+    write.csv(tidy(cox_septal, exponentiate = TRUE, conf.int = TRUE),
+              "../2_Output/Table3_Cox_SeptalThickness.csv", row.names = FALSE)
+  }
+
+  forest_rows <- bind_rows(
+    if (!is.null(cox_fp)) {
+      tidy(cox_fp, exponentiate = TRUE, conf.int = TRUE) %>%
+        filter(term %in% c("fp_classElevated", "age", "SexFemale", "LBMI")) %>%
+        transmute(
+          exposure = case_when(
+            term == "fp_classElevated" ~ "Elevated filling pressure",
+            term == "age" ~ "Age (per year)",
+            term == "SexFemale" ~ "Female sex",
+            term == "LBMI" ~ "LBMI (per kg/m^2)",
+            TRUE ~ term
+          ),
+          estimate, conf.low, conf.high, p.value
+        )
+    },
+    if (exists("cox_z") && !is.null(cox_z)) {
+      tidy(cox_z, exponentiate = TRUE, conf.int = TRUE) %>%
+        filter(term == "dd_zscore") %>%
+        transmute(
+          exposure = "DD Z-score (per 1-SD increase)",
+          estimate, conf.low, conf.high, p.value
+        )
+    },
+    if (exists("cox_lvot") && !is.null(cox_lvot)) {
+      tidy(cox_lvot, exponentiate = TRUE, conf.int = TRUE) %>%
+        filter(term == "lvot_max_gradient_10") %>%
+        transmute(
+          exposure = "Max LVOT gradient (per 10 mm Hg)",
+          estimate, conf.low, conf.high, p.value
+        )
+    },
+    if (exists("cox_septal") && !is.null(cox_septal)) {
+      tidy(cox_septal, exponentiate = TRUE, conf.int = TRUE) %>%
+        filter(term == "lv_septal_thickness_0_5") %>%
+        transmute(
+          exposure = "LV septal thickness (per 0.5 cm)",
+          estimate, conf.low, conf.high, p.value
+        )
+    }
+  ) %>%
+    mutate(
+      exposure_wrapped = str_wrap(as.character(exposure), width = 16),
+      hr_label = sprintf("%.2f (%.2f-%.2f)", estimate, conf.low, conf.high),
+      forest_color = case_when(
+        exposure %in% c("Elevated filling pressure", "LV septal thickness (per 0.5 cm)") ~ fig5_palette["highlight"],
+        TRUE ~ fig5_palette["forest"]
+      ),
+      exposure = factor(exposure, levels = rev(unique(exposure)))
+    )
+
+  if (nrow(forest_rows) > 0) {
+    xmax_data <- max(forest_rows$conf.high, na.rm = TRUE)
+    xmax <- xmax_data * 1.25
+
+    p_hf_forest <- ggplot(forest_rows, aes(x = estimate, y = exposure_wrapped)) +
+      geom_vline(xintercept = 1, linetype = "dashed", color = fig5_palette["refline"], linewidth = 0.5) +
+      geom_errorbarh(aes(xmin = conf.low, xmax = conf.high, color = forest_color), height = 0.14,
+                     linewidth = 0.7, show.legend = FALSE) +
+      geom_point(size = 2.8, shape = 21, stroke = 0.4,
+                 aes(fill = forest_color, color = forest_color), show.legend = FALSE) +
+      geom_text(aes(x = pmin(conf.high * 1.035, xmax_data * 1.13), label = hr_label),
+                hjust = 0, size = 2.2, color = fig5_palette["text"]) +
+      scale_color_identity() +
+      scale_fill_identity() +
+      scale_x_log10(
+        limits = c(0.9, xmax),
+        breaks = c(1, 1.5, 2, 3, 4),
+        expand = expansion(mult = c(0.01, 0.005))
+      ) +
+      labs(
+        title = "Adjusted Hazard Ratios",
+        x = "Hazard Ratio (log scale)",
+        y = NULL
+      ) +
+      coord_cartesian(clip = "off") +
+      theme_jacc() +
+      theme(
+        legend.position = "none",
+        plot.margin = margin(4, 0, 4, 2),
+        axis.text.y = element_text(angle = 0, hjust = 1, size = 7.5, lineheight = 0.9, color = fig5_palette["text"]),
+        axis.text.x = element_text(color = fig5_palette["text"]),
+        axis.title.x = element_text(color = fig5_palette["text"]),
+        axis.line = element_line(color = fig5_palette["text"], linewidth = 0.35)
+      )
+
+    km_placeholder <- function(label) {
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5, label = label, size = 3.1) +
+        theme_void()
+    }
+
+    fig5_design <- "
+ABC
+DEE
+"
+
+    fig5 <- wrap_plots(
+      A = if (!is.null(p_km_ee)) p_km_ee else km_placeholder("E/e' KM unavailable"),
+      B = if (!is.null(p_km_lavi)) p_km_lavi else km_placeholder("LAVI KM unavailable"),
+      C = if (!is.null(p_km_trv)) p_km_trv else km_placeholder("TR Vmax KM unavailable"),
+      D = if (!is.null(p_km_fp)) p_km_fp else km_placeholder("Primary-parameter KM unavailable"),
+      E = p_hf_forest,
+      design = fig5_design
+    ) +
+      plot_annotation(tag_levels = "A", tag_prefix = "(", tag_suffix = ")") &
+      theme(
+        plot.tag = element_text(face = "bold", size = 11)
+      )
+
+    show_and_save_jacc(fig5, "../2_Output/Figure5_HeartFailure_Outcomes.pdf", w = 7.0, h = 6.8)
+  }
+} else {
+  cat("Insufficient events for survival analysis.\n")
+}
+```
+
+**Figure 5. Heart Failure Outcomes Across ASE Threshold Components, Primary-Parameter Status, and Structural Obstruction Markers.** **(A)** Kaplan-Meier estimates for the composite heart failure endpoint stratified by abnormal baseline E/e$'$ (>14). **(B)** Kaplan-Meier estimates stratified by abnormal baseline LAVI (>34 mL/m$^2$). **(C)** Kaplan-Meier estimates stratified by abnormal baseline TR V$_{max}$ (>2.8 m/s). **(D)** Kaplan-Meier estimates stratified by the same binary primary-parameter grouping used in the patient-characteristics table (`Normal` = no abnormal primary parameter, `Abnormal` = at least 1 abnormal primary parameter). **(E)** Adjusted hazard ratios from multivariable Cox proportional hazards models for elevated filling pressure classification, continuous diastolic dysfunction burden expressed as the baseline LAVI-derived DD Z-score, max LVOT gradient, LV septal thickness, age, sex, and lean body mass index. Shaded bands denote 95% confidence intervals in Kaplan-Meier panels. Abbreviations: CPET = cardiopulmonary exercise testing; DD = diastolic dysfunction; HCM = hypertrophic cardiomyopathy; HR = hazard ratio; LAVI = left atrial volume index; LVOT = left ventricular outflow tract; TR V$_{max}$ = peak tricuspid regurgitation velocity.
+
+::: {.content-visible when-format="html"}
+
+# Patient Characteristics
+
+## Table 1
+
+```{r table1, results='asis'}
+table1_data <- baseline_df %>%
+  mutate(
+    VeVco2_slope = as.numeric(as.character(VeVco2_slope)),
+    HCM_Phenotype = as.factor(HCM_Phenotype)
+  ) %>%
+  select(fp_class, age, Sex, BMI, BSA, LBMI, HCM_Phenotype,
+         pk.RER, VO2_FRIEND2_PP, VO2_WASSERMAN_PP, VeVco2_slope, HRR,
+         lvot_max_gradient, lv_septal_thickness,
+         e_prime_ave, med_peak_e_vel, lat_peak_e_vel,
+         e_e_ave, la_vol_index, E_vel, tr_max_vel, mv_e_a, mv_dec_time, ef_modsp4)
+
+# Overall
+table1_overall <- table1_data %>%
+  select(-fp_class) %>%
+  tbl_summary(
+    label = list(
+      age              ~ "Age, years",
+      Sex              ~ "Sex",
+      BMI              ~ "Body Mass Index, kg/m\u00B2",
+      BSA              ~ "Body Surface Area, m\u00B2",
+      LBMI             ~ "Lean Body Mass Index, kg/m\u00B2",
+      HCM_Phenotype    ~ "HCM Phenotype",
+      pk.RER           ~ "Peak RER",
+      VO2_FRIEND2_PP   ~ "Peak VO\u2082 (FRIEND 2.0 %pred)",
+      VO2_WASSERMAN_PP ~ "Peak VO\u2082 (Wasserman %pred)",
+      VeVco2_slope     ~ "VE/VCO\u2082 Slope",
+      HRR              ~ "Heart Rate Recovery (1 min)",
+      lvot_max_gradient ~ "Max LVOT Gradient, mm Hg",
+      lv_septal_thickness ~ "LV Septal Thickness, cm",
+      e_prime_ave      ~ "Average e', cm/s",
+      med_peak_e_vel   ~ "Septal e', cm/s",
+      lat_peak_e_vel   ~ "Lateral e', cm/s",
+      e_e_ave          ~ "E/e' (average)",
+      la_vol_index     ~ "LAVI, mL/m\u00B2",
+      E_vel            ~ "Mitral E Velocity, cm/s",
+      tr_max_vel       ~ "TR Vmax, cm/s",
+      mv_e_a           ~ "E/A Ratio",
+      mv_dec_time      ~ "MV Deceleration Time, ms",
+      ef_modsp4        ~ "LVEF, %"
+    ),
+    statistic = list(all_continuous() ~ "{mean} ({sd})",
+                     all_categorical() ~ "{n} ({p}%)"),
+    digits = all_continuous() ~ 1,
+    missing = "no"
+  ) %>%
+  bold_labels() %>%
+  modify_caption("**Table 1. Baseline Patient Characteristics**")
+
+if (!is_gfm_output) {
+  table1_overall
+}
+
+table1_overall %>%
+  as_flex_table() %>%
+  save_as_docx(path = "../2_Output/Table1_Manuscript.docx")
+```
+
+## Figure 1: Cohort Characteristics
+
+```{r figure1, fig.width=6.9, fig.height=7.5}
+accent  <- jacc_cols["blue"]
+gray_f  <- "grey78"
+
+# Panel A: Age
+p_age <- ggplot(table1_data, aes(x = age)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 5, fill = gray_f, alpha = 0.7, color = "white") +
+  geom_density(color = accent, linewidth = 0.8) +
+  labs(title = "Age", x = "Years", y = "Density") +
+  theme_jacc()
+
+# Panel B: BMI
+p_bmi <- ggplot(table1_data, aes(x = BMI)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 2, fill = gray_f, alpha = 0.7, color = "white") +
+  geom_density(color = accent, linewidth = 0.8) +
+  labs(title = "BMI", x = bquote("kg/" * m^2), y = "Density") +
+  theme_jacc()
+
+# Panel C: LBMI
+p_lbmi <- ggplot(table1_data, aes(x = LBMI)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 1, fill = gray_f, alpha = 0.7, color = "white") +
+  geom_density(color = accent, linewidth = 0.8) +
+  labs(title = "LBMI", x = bquote("kg/" * m^2), y = "Density") +
+  theme_jacc()
+
+# Panel D: Peak VO2 comparison
+vo2_long <- table1_data %>%
+  select(VO2_FRIEND2_PP, VO2_WASSERMAN_PP) %>%
+  pivot_longer(everything(), names_to = "Equation", values_to = "Value") %>%
+  mutate(Equation = recode(Equation,
+                            "VO2_FRIEND2_PP" = "FRIEND 2.0",
+                            "VO2_WASSERMAN_PP" = "Wasserman"))
+
+p_vo2 <- ggplot(vo2_long, aes(x = Value, fill = Equation)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 25, alpha = 0.35, position = "identity", color = "white") +
+  geom_density(aes(color = Equation), linewidth = 0.6) +
+  scale_fill_manual(values = c("FRIEND 2.0" = jacc_cols["blue"], "Wasserman" = jacc_cols["gray"])) +
+  scale_color_manual(values = c("FRIEND 2.0" = jacc_cols["navy"], "Wasserman" = jacc_cols["gray"])) +
+  scale_x_continuous(limits = c(0, 200)) +
+  labs(title = bquote(bold("Peak" ~ VO[2] ~ "Comparison")),
+       x = bquote("% Predicted" ~ VO[2]), y = "Density") +
+  theme_jacc()
+
+# Panel E: VE/VCO2
+p_vevco2 <- ggplot(table1_data, aes(x = VeVco2_slope)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 20, fill = gray_f, alpha = 0.7, color = "white") +
+  geom_density(color = accent, linewidth = 0.8) +
+  labs(title = bquote(bold(VE/VCO[2] ~ "Slope")), x = bquote(VE/VCO[2]), y = "Density") +
+  theme_jacc()
+
+# Panel F-I: Echo distributions
+p_ee <- ggplot(table1_data, aes(x = e_e_ave)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 20, fill = gray_f, alpha = 0.7, color = "white") +
+  geom_density(color = jacc_cols["red"], linewidth = 0.8) +
+  geom_vline(xintercept = 14, linetype = "dashed", color = jacc_cols["red"], linewidth = 0.4) +
+  labs(title = "E/e' (average)", x = "E/e'", y = "Density") +
+  theme_jacc()
+
+p_lavi <- ggplot(table1_data, aes(x = la_vol_index)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 20, fill = gray_f, alpha = 0.7, color = "white") +
+  geom_density(color = jacc_cols["red"], linewidth = 0.8) +
+  geom_vline(xintercept = 34, linetype = "dashed", color = jacc_cols["red"], linewidth = 0.4) +
+  labs(title = "LAVI", x = bquote("mL/" * m^2), y = "Density") +
+  theme_jacc()
+
+p_trv <- ggplot(table1_data, aes(x = tr_max_vel)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 20, fill = gray_f, alpha = 0.7, color = "white") +
+  geom_density(color = jacc_cols["red"], linewidth = 0.8) +
+  geom_vline(xintercept = 280, linetype = "dashed", color = jacc_cols["red"], linewidth = 0.4) +
+  labs(title = "TR Vmax", x = "cm/s", y = "Density") +
+  theme_jacc()
+
+p_eprime <- ggplot(table1_data, aes(x = e_prime_ave)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 20, fill = gray_f, alpha = 0.7, color = "white") +
+  geom_density(color = jacc_cols["red"], linewidth = 0.8) +
+  geom_vline(xintercept = 6.5, linetype = "dashed", color = jacc_cols["red"], linewidth = 0.4) +
+  labs(title = "Average e'", x = "cm/s", y = "Density") +
+  theme_jacc()
+
+p_ea <- ggplot(table1_data, aes(x = mv_e_a)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 20, fill = gray_f, alpha = 0.7, color = "white") +
+  geom_density(color = jacc_cols["red"], linewidth = 0.8) +
+  geom_vline(xintercept = c(0.8, 2.0), linetype = "dashed", color = jacc_cols["red"], linewidth = 0.4) +
+  labs(title = "E/A Ratio", x = "E/A", y = "Density") +
+  theme_jacc()
+
+p_ef <- ggplot(table1_data, aes(x = ef_modsp4)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 20, fill = gray_f, alpha = 0.7, color = "white") +
+  geom_density(color = accent, linewidth = 0.8) +
+  labs(title = "LVEF", x = "%", y = "Density") +
+  theme_jacc()
+
+fig1 <- (p_age | p_bmi | p_lbmi) /
+        (p_vo2 | p_vevco2 | p_eprime) /
+        (p_ee | p_lavi | p_trv) /
+        (p_ea | p_ef | plot_spacer()) +
+  plot_annotation(
+    tag_levels = "A",
+    tag_prefix = "(",
+    tag_suffix = ")",
+    title = "Baseline Cohort Biometrics, Functional Capacity, and Echocardiography"
+  ) &
+  theme(plot.tag = element_text(face = "bold", size = 10))
+
+show_and_save_jacc(fig1, "../2_Output/Figure1_Cohort_Characteristics.pdf", w = 6.9, h = 9.5)
+```
+
+**Legend.** Distribution of baseline clinical, exercise, and echocardiographic characteristics in the analytic cohort. Panels summarize age, body mass index, lean body mass index, Peak VO$_2$ by 2 prediction equations, VE/VCO$_2$ slope, and key echocardiographic measures relevant to diastolic assessment. Dashed red vertical reference lines indicate clinically relevant threshold values where applicable.
+
+:::
+
+# Supplemental Analyses
+
+## All diastolic parameters: restricted cubic splines
+
+```{r supplemental_rcs_all_prepare, include=FALSE}
+supp_outcome_specs <- tribble(
+  ~outcome,           ~outcome_label,                   ~curve_color,          ~fill_color,
+  "VO2_FRIEND2_PP",   "Peak VO\u2082 (% Predicted)",    jacc_cols["navy"],     jacc_cols["blue"],
+  "VeVco2_slope",     "VE/VCO\u2082 Slope",             jacc_cols["orange"],   jacc_cols["orange"]
+)
+
+supp_rcs_all_curves <- bind_rows(lapply(seq_len(nrow(supp_outcome_specs)), function(i) {
+  spec <- supp_outcome_specs[i, ]
+  bind_rows(lapply(diastolic_indices, function(idx) {
+    fit_obj <- fit_rcs_model(baseline_df, spec$outcome, idx, nk = 4)
+    if (is.null(fit_obj)) return(NULL)
+
+    lo <- quantile(fit_obj$df[[idx]], 0.02, na.rm = TRUE)
+    hi <- quantile(fit_obj$df[[idx]], 0.98, na.rm = TRUE)
+
+    pred_grid_rcs(idx, fit_obj$df, fit_obj$spline, fit_obj$knots, lo, hi) %>%
+      mutate(
+        outcome = spec$outcome,
+        outcome_label = spec$outcome_label,
+        label = label_map[var],
+        panel_label = paste0(spec$outcome_label, " | ", label_map[var]),
+        curve_color = spec$curve_color,
+        fill_color = spec$fill_color
+      ) %>%
+      left_join(ase_cutoffs_all, by = c("var" = "variable"))
+  }))
+}))
+```
+
+```{r supplemental_rcs_all_figure, fig.width=11, fig.height=10.5, out.width='100%'}
+if (nrow(supp_rcs_all_curves) > 0) {
+  fig_s3_rcs_all <- ggplot(supp_rcs_all_curves, aes(x = x, y = fit)) +
+    geom_ribbon(aes(ymin = lo, ymax = hi, fill = outcome_label), alpha = 0.14, color = NA) +
+    geom_line(aes(color = outcome_label), linewidth = 0.7) +
+    geom_vline(
+      data = supp_rcs_all_curves %>%
+        distinct(panel_label, ase_cutoff) %>%
+        filter(!is.na(ase_cutoff)),
+      aes(xintercept = ase_cutoff),
+      inherit.aes = FALSE,
+      color = jacc_cols["blue"],
+      linetype = "dashed",
+      linewidth = 0.4
+    ) +
+    facet_wrap(~ panel_label, scales = "free", ncol = 4) +
+    scale_color_manual(values = setNames(supp_outcome_specs$curve_color, supp_outcome_specs$outcome_label)) +
+    scale_fill_manual(values = setNames(supp_outcome_specs$fill_color, supp_outcome_specs$outcome_label)) +
+    labs(
+      title = "Supplemental Restricted Cubic Splines Across All Available Diastolic Parameters",
+      subtitle = "Panels show age-, sex-, and LBMI-adjusted spline fits for Peak VO2 and VE/VCO2 slope",
+      x = NULL,
+      y = "Predicted outcome"
+    ) +
+    theme_jacc() +
+    theme(
+      strip.text = element_text(size = 6),
+      axis.text = element_text(size = 6),
+      axis.title = element_text(size = 8),
+      legend.position = "bottom"
+    )
+
+  show_and_save_jacc(fig_s3_rcs_all, "../2_Output/Figure_S5_RCS_AllDiastolic_Parameters.pdf", w = 11, h = 10.5)
+  save_jacc(fig_s3_rcs_all, "../Manuscript/Supplemental/Figure_S5_RCS_AllDiastolic_Parameters.pdf", w = 11, h = 10.5)
+} else {
+  ggplot() +
+    annotate("text", x = 0.5, y = 0.5, label = "All-parameter RCS curves unavailable") +
+    theme_void()
+}
+```
+
+**Legend.** Supplemental restricted cubic spline models relating all available diastolic parameters to Peak VO$_2$ and VE/VCO$_2$ slope. Each panel shows the adjusted spline-estimated association for a single parameter-outcome pair after adjustment for age, sex, and lean body mass index. Shaded ribbons indicate 95% confidence intervals. Dashed blue vertical lines indicate ASE 2025 reference cutoffs where available for the 3 HCM primary parameters.
+
+## All diastolic parameters: OMAR
+
+```{python omar_all_diastolic_analysis, include=FALSE}
+omar_all_model_rows = []
+omar_all_threshold_rows = []
+omar_all_pd_rows = []
+all_diastolic_indices = [
+    "e_e_ave", "e_e_lat", "e_e_med", "mv_a_dur", "mv_a_point", "mv_dec_time",
+    "mv_e_a", "tr_max_vel", "la_vol_index", "med_peak_e_vel", "lat_peak_e_vel",
+    "e_prime_ave"
+]
+all_diastolic_available = [idx for idx in all_diastolic_indices if idx in baseline_r.columns]
+supp_single_predictor_base = ["age", "BMI", "Sex_num"]
+
+for outcome in outcome_vars:
+    for idx in all_diastolic_available:
+        fit = fit_omarx_variant(
+            df_source=omar_clean_df,
+            outcome=outcome,
+            predictors=[idx] + supp_single_predictor_base,
+            target_vars=[idx],
+            predictor_set_name="single_parameter_bmi",
+            qc_variant="supp_single_parameter",
+            mode="mars",
+            global_max_knots=6,
+            min_span=0.10,
+            variable_max_knots_dict={idx: 3, "age": 1, "BMI": 1},
+            impute_predictors=False,
+            include_importance=False
+        )
+        if fit is None:
+            continue
+        omar_all_model_rows.append({
+            "outcome": fit["outcome"],
+            "variable": idx,
+            "mode": fit["mode"],
+            "predictor_set_name": fit["predictor_set_name"],
+            "qc_variant": fit["qc_variant"],
+            "n_complete": fit["n_complete"],
+            "n": fit["n"],
+            "r2": fit["r2"],
+            "adj_r2": fit["adj_r2"],
+            "aic": fit["aic"],
+            "bic": fit["bic"],
+            "global_max_knots": fit["global_max_knots"]
+        })
+        if len(fit["threshold_summary"]) > 0:
+            omar_all_threshold_rows.extend(fit["threshold_summary"])
+        if len(fit["partial_dep"]) > 0:
+            omar_all_pd_rows.extend(fit["partial_dep"])
+
+omar_all_results = {
+    "model_summary": omar_all_model_rows,
+    "threshold_summary": omar_all_threshold_rows,
+    "partial_dep": omar_all_pd_rows
+}
+```
+
+```{r supplemental_omar_all_prepare, include=FALSE}
+omar_all_results_r <- get_omar_all_results()
+
+empty_omar_all_model_tbl <- tibble(
+  outcome = character(),
+  variable = character(),
+  mode = character(),
+  predictor_set_name = character(),
+  qc_variant = character(),
+  n_complete = integer(),
+  n = integer(),
+  r2 = numeric(),
+  adj_r2 = numeric(),
+  aic = numeric(),
+  bic = numeric(),
+  global_max_knots = integer(),
+  outcome_label = character(),
+  var_label = character(),
+  panel_label = character()
+)
+
+if (!is.null(omar_all_results_r) && length(omar_all_results_r) > 0) {
+  omar_all_model_summary <- as_tbl(omar_all_results_r$model_summary) %>%
+    mutate(
+      outcome_label = outcome_label_map[outcome],
+      var_label = label_map[variable],
+      panel_label = paste0(outcome_label, " | ", var_label)
+    )
+
+  omar_all_threshold_summary <- as_tbl(omar_all_results_r$threshold_summary) %>%
+    left_join(ase_cutoffs_all, by = "variable") %>%
+    mutate(
+      outcome_label = outcome_label_map[outcome],
+      var_label = label_map[variable],
+      panel_label = paste0(outcome_label, " | ", var_label)
+    )
+
+  omar_all_pd_all <- as_tbl(omar_all_results_r$partial_dep) %>%
+    mutate(
+      outcome_label = outcome_label_map[outcome],
+      var_label = label_map[variable],
+      panel_label = paste0(outcome_label, " | ", var_label)
+    )
+} else {
+  omar_all_model_summary <- empty_omar_all_model_tbl
+  omar_all_threshold_summary <- empty_threshold_tbl %>%
+    mutate(panel_label = character())
+  omar_all_pd_all <- empty_pd_tbl %>%
+    mutate(panel_label = character())
+}
+```
+
+```{r supplemental_omar_all_figure, fig.width=11, fig.height=10.5, out.width='100%'}
+if (nrow(omar_all_pd_all) > 0) {
+  supp_omar_outcome_specs <- tribble(
+    ~outcome_label,                ~curve_color,
+    "Peak VO\u2082 (% Predicted)", jacc_cols["navy"],
+    "VE/VCO\u2082 Slope",          jacc_cols["orange"]
+  )
+
+  fig_s4_omar_all <- ggplot(omar_all_pd_all, aes(x = x, y = y_pred, color = outcome_label)) +
+    geom_line(linewidth = 0.7) +
+    geom_vline(
+      data = omar_all_threshold_summary %>% filter(!is.na(knot)),
+      aes(xintercept = knot),
+      inherit.aes = FALSE,
+      color = jacc_cols["red"],
+      linewidth = 0.4
+    ) +
+    geom_vline(
+      data = omar_all_pd_all %>%
+        distinct(panel_label, variable) %>%
+        left_join(ase_cutoffs_all, by = "variable") %>%
+        filter(!is.na(ase_cutoff)),
+      aes(xintercept = ase_cutoff),
+      inherit.aes = FALSE,
+      color = jacc_cols["blue"],
+      linetype = "dashed",
+      linewidth = 0.35
+    ) +
+    facet_wrap(~ panel_label, scales = "free", ncol = 4) +
+    scale_color_manual(values = setNames(supp_omar_outcome_specs$curve_color, supp_omar_outcome_specs$outcome_label)) +
+    labs(
+      title = "Supplemental OMARX Partial Dependence Across All Available Diastolic Parameters",
+      subtitle = "Panels show single-parameter OMARX fits adjusted for age, sex, and LBMI",
+      x = NULL,
+      y = "Predicted outcome"
+    ) +
+    theme_jacc() +
+    theme(
+      strip.text = element_text(size = 6),
+      axis.text = element_text(size = 6),
+      axis.title = element_text(size = 8),
+      legend.position = "none"
+    )
+
+  show_and_save_jacc(fig_s4_omar_all, "../2_Output/Figure_S6_OMARX_AllDiastolic_Parameters.pdf", w = 11, h = 10.5)
+  save_jacc(fig_s4_omar_all, "../Manuscript/Supplemental/Figure_S6_OMARX_AllDiastolic_Parameters.pdf", w = 11, h = 10.5)
+} else {
+  ggplot() +
+    annotate("text", x = 0.5, y = 0.5, label = "All-parameter OMARX curves unavailable") +
+    theme_void()
+}
+```
+
+**Legend.** Supplemental OMARX-derived partial dependence plots relating all available diastolic parameters to Peak VO$_2$ and VE/VCO$_2$ slope. Each panel shows the modeled marginal association for a single parameter-outcome pair after adjustment for age, sex, and lean body mass index. Solid red vertical lines denote OMARX-retained hinge locations, and dashed blue vertical lines denote ASE 2025 reference cutoffs where available for the 3 HCM primary parameters.
+
+## Age-residualized diastolic indices
+
+```{r residualize, fig.width=6.9, fig.height=4.5}
+baseline_df_resid <- baseline_df
+for (idx in diastolic_indices) {
+  baseline_df_resid <- residualize_on_age(baseline_df_resid, idx)
+}
+
+resid_summary <- bind_rows(lapply(diastolic_indices, function(idx) {
+  resid_col <- paste0(idx, "_resid")
+  tibble(
+    index    = idx,
+    label    = label_map[idx],
+    n_raw    = sum(!is.na(baseline_df[[idx]])),
+    n_resid  = sum(!is.na(baseline_df_resid[[resid_col]])),
+    sd_resid = round(sd(baseline_df_resid[[resid_col]], na.rm = TRUE), 3)
+  )
+}))
+
+resid_summary %>%
+  flextable() %>%
+  bold(part = "header") %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  set_caption("Table S. Age-Residualized Diastolic Indices Summary")
+
+# Diagnostic boxplot
+resid_long <- baseline_df_resid %>%
+  select(all_of(paste0(diastolic_indices, "_resid"))) %>%
+  pivot_longer(everything(), names_to = "index", values_to = "resid") %>%
+  mutate(index = str_replace(index, "_resid$", ""),
+         label = label_map[index])
+
+p_resid <- ggplot(resid_long, aes(x = label, y = resid)) +
+  geom_boxplot(fill = "grey85", color = "black", outlier.size = 0.5, linewidth = 0.3) +
+  coord_flip() +
+  labs(title = "Age-Residualized Diastolic Indices", x = NULL, y = "Residual") +
+  theme_jacc()
+
+show_and_save_jacc(p_resid, "../2_Output/FigureS_AgeResidualized_DiastolicIndices.pdf", w = 6.9, h = 4.5)
+```
+
+**Legend.** Distribution of age-residualized diastolic indices. Residuals were derived from nonlinear age-adjustment models for each index so that the resulting values reflect deviation from the expected age-specific value. Boxplots show the median, interquartile range, and distribution of residual variability across the included echocardiographic parameters.
+
+## Export missing echo audit
+
+```{r export_missing_echo}
+echo_vars_present <- intersect(
+  c("e_e_ave", "e_e_lat", "e_e_med", "med_peak_e_vel", "ef_modsp4",
+    "la_vol", "la_vol_index", "lat_peak_e_vel", "mv_a_point", "mv_a_dur",
+    "mv_dec_time", "mv_e_a", "pulm_dias_vel", "tr_max_vel"),
+  colnames(cpx_echo)
+)
+
+missing_echo <- cpx_aligned %>%
+  anti_join(cpx_echo %>% select(ID, cpx_test_date) %>% distinct(),
+            by = c("ID", "cpx_test_date")) %>%
+  arrange(MRN, cpx_test_date) %>%
+  select(ID, MRN, CPX.sequential, cpx_test_date, days_from_baseline, age, Sex, BMI, LBMI,
+         VO2_FRIEND2_PP, VeVco2_slope)
+
+if (nrow(missing_echo) > 0) {
+  openxlsx::write.xlsx(
+    list(Missing_Echo_CPX = missing_echo,
+         Summary = tibble(n_missing = nrow(missing_echo),
+                          n_patients = n_distinct(missing_echo$ID))),
+    file = "../2_Output/Serial_CPX_missing_resting_echo.xlsx",
+    overwrite = TRUE
+  )
+  cat(sprintf("Exported %d CPX tests without echo linkage (%d patients)\n",
+              nrow(missing_echo), n_distinct(missing_echo$ID)))
+}
+```
+
+```{r reviewer_code_appendix, eval=is_gfm_output, results='asis', echo=FALSE}
+emit_code_details <- function(title, read_path, display_path, lang = "") {
+  if (!file.exists(read_path)) {
+    return(invisible(NULL))
+  }
+
+  file_lines <- readLines(read_path, warn = FALSE)
+
+  cat("<details>\n")
+  cat(sprintf("<summary>%s</summary>\n\n", title))
+  cat(sprintf("Path: `%s`\n\n", display_path))
+  cat(sprintf("````%s\n", lang))
+  cat(paste(file_lines, collapse = "\n"))
+  cat("\n````\n\n")
+  cat("</details>\n\n")
+}
+
+cat("## Reviewer Code\n\n")
+cat("The rendered results above are generated from the source files below so reviewers can inspect the exact analysis workflow used for this repository.\n\n")
+
+emit_code_details(
+  title = "Main Quarto analysis source",
+  read_path = "README_HCM.Diastologyv2.qmd",
+  display_path = "_Scripts/README_HCM.Diastologyv2.qmd",
+  lang = "qmd"
+)
+
+emit_code_details(
+  title = "OMARX notebook loader used by the Quarto analysis",
+  read_path = "python_vendor/omarx_from_notebook.py",
+  display_path = "_Scripts/python_vendor/omarx_from_notebook.py",
+  lang = "python"
+)
+
+cat("OMARX notebook source: [`_Scripts/omarx_v3.ipynb`](_Scripts/omarx_v3.ipynb)\n\n")
+cat("Additional analysis scripts and exported outputs are available in the repository folders [`_Scripts/`](_Scripts) and [`2_Output/`](2_Output).\n")
+```
+
+```{r session_info, eval=!is_gfm_output}
+cat("\n\n---\n**Session Info:**\n")
+sessionInfo()
+```
+````
+
+</details>
+
+<details>
+
+<summary>
+
+OMARX notebook loader used by the Quarto analysis
+</summary>
+
+Path: `_Scripts/python_vendor/omarx_from_notebook.py`
+
+``` python
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+
+def _is_runtime_example_cell(source: str) -> bool:
+    stripped = source.strip()
+    if not stripped:
+        return True
+
+    hard_skip_patterns = [
+        r"pd\.read_csv\s*\(",
+        r"pd\.read_excel\s*\(",
+        r"\bcsv_path\s*=\s*Path\(",
+    ]
+    if any(re.search(pattern, source) for pattern in hard_skip_patterns):
+        return True
+
+    definition_markers = ("def ", "class ", "@dataclass")
+    if any(marker in source for marker in definition_markers):
+        return False
+
+    runtime_patterns = [
+        r"\bomarx_fit\s*\(",
+        r"\bsave_omarx_diagnostics\s*\(",
+        r"\bhelper_feature_importance\s*\(",
+        r"\bcfg_[A-Za-z0-9_]+\b",
+        r"\bbasis_[A-Za-z0-9_]+\b",
+        r"\bdf_model\b",
+        r"\bdf_vo2_imp\b",
+        r"\bdf_vevco2_imp\b",
+    ]
+    return any(re.search(pattern, source) for pattern in runtime_patterns)
+
+
+def _load_notebook_namespace() -> dict:
+    notebook_path = Path(__file__).resolve().parents[1] / "omarx_v3.ipynb"
+    if not notebook_path.exists():
+        raise FileNotFoundError(f"OMARX notebook not found: {notebook_path}")
+
+    notebook = json.loads(notebook_path.read_text())
+    code_blocks = []
+
+    for cell in notebook.get("cells", []):
+        if cell.get("cell_type") != "code":
+            continue
+
+        source = "".join(cell.get("source", []))
+        if not source.strip():
+            continue
+
+        if 'if __name__ == "__main__":' in source:
+            source = source.split('if __name__ == "__main__":', 1)[0]
+
+        if _is_runtime_example_cell(source):
+            continue
+
+        if source.strip():
+            code_blocks.append(source)
+
+    namespace = {"__name__": "omarx_from_notebook"}
+    exec("\n\n".join(code_blocks), namespace)
+    return namespace
+
+
+_NS = _load_notebook_namespace()
+
+OMARXConfig = _NS["OMARXConfig"]
+omarx_fit = _NS["omarx_fit"]
+helper_build_basis_for_knots = _NS["helper_build_basis_for_knots"]
+helper_fit_model = _NS["helper_fit_model"]
+helper_detect_tracks = _NS["helper_detect_tracks"]
+helper_standardize = _NS["helper_standardize"]
+helper_build_interactions = _NS.get("helper_build_interactions")
+helper_feature_importance = _NS.get("helper_feature_importance")
+save_omarx_diagnostics = _NS.get("save_omarx_diagnostics")
+sm = _NS["sm"]
+np = _NS["np"]
+pd = _NS["pd"]
+
+__all__ = [
+    "OMARXConfig",
+    "omarx_fit",
+    "helper_build_basis_for_knots",
+    "helper_fit_model",
+    "helper_detect_tracks",
+    "helper_standardize",
+    "helper_build_interactions",
+    "helper_feature_importance",
+    "save_omarx_diagnostics",
+    "sm",
+    "np",
+    "pd",
+]
+```
+
+</details>
+
+OMARX notebook source:
+[`_Scripts/omarx_v3.ipynb`](_Scripts/omarx_v3.ipynb)
+
+Additional analysis scripts and exported outputs are available in the
+repository folders [`_Scripts/`](_Scripts) and [`2_Output/`](2_Output).
