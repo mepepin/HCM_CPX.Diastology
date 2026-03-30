@@ -1,5 +1,9 @@
 # PHI / patient-level data — never commit
 1_Input/
+2_Output/Data_CrossSectional_Analysis.csv
+2_Output/Cycle/Cycle_Linked_Tests.xlsx
+2_Output/Serial_CPX_missing_resting_echo.xlsx
+outputs/audit/Serial_CPX_missing_resting_echo.xlsx
 
 # macOS
 .DS_Store
