@@ -111,6 +111,8 @@ show_and_save_jacc <- function(plot, path, w = 6.9, h = 4.5) {
   invisible(plot)
 }
 
+is_gfm_output <- knitr::pandoc_to("gfm") || knitr::pandoc_to("commonmark")
+
 get_omar_results <- function() {
   if (!reticulate::py_available(initialize = FALSE)) return(NULL)
   if (!reticulate::py_has_attr(reticulate::py, "omar_results")) return(NULL)
@@ -796,7 +798,9 @@ tbl_ase <- baseline_df %>%
   bold_labels() %>%
   modify_caption("**Table: Patient Characteristics by Any Abnormal HCM Primary Parameter**")
 
-tbl_ase
+if (!is_gfm_output) {
+  tbl_ase
+}
 
 tbl_ase %>% as_flex_table() %>%
   save_as_docx(path = "../2_Output/Table_ASE2025_FillingPressure.docx")
@@ -1837,7 +1841,7 @@ def bootstrap_lavi_stability(df_source: pd.DataFrame, outcome: str, predictors: 
     return pd.DataFrame(rows)
 ```
 
-```{python omar_analysis, eval=TRUE}
+```{python omar_analysis, eval=TRUE, include=FALSE}
 cross_sectional_export = Path.cwd().parent / "2_Output" / "Data_CrossSectional_Analysis.csv"
 if cross_sectional_export.exists():
     baseline_r = pd.read_csv(cross_sectional_export)
@@ -3193,8 +3197,10 @@ surv_df <- baseline_df %>%
   ) %>%
   filter(!is.na(follow_up_yrs), follow_up_yrs > 0)
 
-cat(sprintf("Survival cohort: %d patients, %d events\n",
-            nrow(surv_df), sum(surv_df$hf_composite == 1, na.rm = TRUE)))
+if (!is_gfm_output) {
+  cat(sprintf("Survival cohort: %d patients, %d events\n",
+              nrow(surv_df), sum(surv_df$hf_composite == 1, na.rm = TRUE)))
+}
 
 fig5_palette <- c(
   reference = "#C4CBD3",
@@ -3321,22 +3327,26 @@ if (nrow(surv_df) >= 30 && sum(surv_df$hf_composite == 1, na.rm = TRUE) >= 5) {
   }, error = function(e) NULL)
 
   if (!is.null(cox_fp)) {
-    cat("\n**Cox Model: Filling Pressure Classification**\n")
-    tidy(cox_fp, exponentiate = TRUE, conf.int = TRUE) %>%
-      mutate(across(where(is.numeric), ~ round(., 3))) %>%
-      flextable() %>%
-      bold(part = "header") %>%
-      theme_booktabs() %>%
-      autofit() %>%
-      set_caption("Table 3. Cox Proportional Hazards: Composite HF Endpoint") %>%
-      print()
+    if (!is_gfm_output) {
+      cat("\n**Cox Model: Filling Pressure Classification**\n")
+      tidy(cox_fp, exponentiate = TRUE, conf.int = TRUE) %>%
+        mutate(across(where(is.numeric), ~ round(., 3))) %>%
+        flextable() %>%
+        bold(part = "header") %>%
+        theme_booktabs() %>%
+        autofit() %>%
+        set_caption("Table 3. Cox Proportional Hazards: Composite HF Endpoint") %>%
+        print()
+    }
 
     write.csv(tidy(cox_fp, exponentiate = TRUE, conf.int = TRUE),
               "../2_Output/Table3_Cox_FillingPressure.csv", row.names = FALSE)
 
     # PH assumption check
     ph_check <- cox.zph(cox_fp)
-    cat(sprintf("\n**Proportional hazards global test p = %.3f**\n", ph_check$table["GLOBAL", "p"]))
+    if (!is_gfm_output) {
+      cat(sprintf("\n**Proportional hazards global test p = %.3f**\n", ph_check$table["GLOBAL", "p"]))
+    }
   }
 
   # Cox: continuous DD Z-score from LAVI GAMLSS model
@@ -3347,10 +3357,12 @@ if (nrow(surv_df) >= 30 && sum(surv_df$hf_composite == 1, na.rm = TRUE) >= 5) {
     if (nrow(surv_z) >= 20 && sum(surv_z$hf_composite == 1, na.rm = TRUE) >= 5) {
       cox_z <- coxph(Surv(follow_up_yrs, hf_composite) ~ dd_zscore + age + Sex + LBMI,
                      data = surv_z)
-      cat("\n**Cox Model: Continuous DD Z-Score**\n")
-      tidy(cox_z, exponentiate = TRUE, conf.int = TRUE) %>%
-        mutate(across(where(is.numeric), ~ round(., 3))) %>%
-        flextable() %>% bold(part = "header") %>% theme_booktabs() %>% autofit() %>% print()
+      if (!is_gfm_output) {
+        cat("\n**Cox Model: Continuous DD Z-Score**\n")
+        tidy(cox_z, exponentiate = TRUE, conf.int = TRUE) %>%
+          mutate(across(where(is.numeric), ~ round(., 3))) %>%
+          flextable() %>% bold(part = "header") %>% theme_booktabs() %>% autofit() %>% print()
+      }
 
       write.csv(tidy(cox_z, exponentiate = TRUE, conf.int = TRUE),
                 "../2_Output/Table3_Cox_DDZscore.csv", row.names = FALSE)
@@ -3491,6 +3503,8 @@ DEE
 
 **Figure 5. Heart Failure Outcomes Across ASE Threshold Components, Primary-Parameter Status, and Structural Obstruction Markers.** **(A)** Kaplan-Meier estimates for the composite heart failure endpoint stratified by abnormal baseline E/e$'$ (>14). **(B)** Kaplan-Meier estimates stratified by abnormal baseline LAVI (>34 mL/m$^2$). **(C)** Kaplan-Meier estimates stratified by abnormal baseline TR V$_{max}$ (>2.8 m/s). **(D)** Kaplan-Meier estimates stratified by the same binary primary-parameter grouping used in the patient-characteristics table (`Normal` = no abnormal primary parameter, `Abnormal` = at least 1 abnormal primary parameter). **(E)** Adjusted hazard ratios from multivariable Cox proportional hazards models for elevated filling pressure classification, continuous diastolic dysfunction burden expressed as the baseline LAVI-derived DD Z-score, max LVOT gradient, LV septal thickness, age, sex, and lean body mass index. Shaded bands denote 95% confidence intervals in Kaplan-Meier panels. Abbreviations: CPET = cardiopulmonary exercise testing; DD = diastolic dysfunction; HCM = hypertrophic cardiomyopathy; HR = hazard ratio; LAVI = left atrial volume index; LVOT = left ventricular outflow tract; TR V$_{max}$ = peak tricuspid regurgitation velocity.
 
+::: {.content-visible when-format="html"}
+
 # Patient Characteristics
 
 ## Table 1
@@ -3544,7 +3558,9 @@ table1_overall <- table1_data %>%
   bold_labels() %>%
   modify_caption("**Table 1. Baseline Patient Characteristics**")
 
-table1_overall
+if (!is_gfm_output) {
+  table1_overall
+}
 
 table1_overall %>%
   as_flex_table() %>%
@@ -3661,6 +3677,8 @@ show_and_save_jacc(fig1, "../2_Output/Figure1_Cohort_Characteristics.pdf", w = 6
 ```
 
 **Legend.** Distribution of baseline clinical, exercise, and echocardiographic characteristics in the analytic cohort. Panels summarize age, body mass index, lean body mass index, Peak VO$_2$ by 2 prediction equations, VE/VCO$_2$ slope, and key echocardiographic measures relevant to diastolic assessment. Dashed red vertical reference lines indicate clinically relevant threshold values where applicable.
+
+:::
 
 # Supplemental Analyses
 
@@ -3978,7 +3996,7 @@ if (nrow(missing_echo) > 0) {
 }
 ```
 
-```{r session_info}
+```{r session_info, eval=!is_gfm_output}
 cat("\n\n---\n**Session Info:**\n")
 sessionInfo()
 ```
