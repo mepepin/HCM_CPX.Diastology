@@ -1,32 +1,213 @@
-# Modeling Left Ventricular Diastolic Dysfunction and Cardiopulmonary
-Fitness in HCM
-Mark E. Pepin, MD, PhD, MS, FESC
-2026-06-05
+---
+title: "Modeling Left Ventricular Diastolic Dysfunction and Cardiopulmonary Fitness in HCM"
+subtitle: "Coding analysis and supplementary validation"
+author: "Mark E. Pepin, MD, PhD, MS, FESC"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+params:
+  run_omarx: false
+  render_gallery: true
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+    code-tools: true
+    code-fold: true
+    self-contained: true
+    include-in-header:
+      text: |
+        <style>
+        main.content p,
+        main.content li,
+        main.content dd,
+        .quarto-title-block p,
+        .cell-output-display p,
+        figcaption,
+        caption {
+          text-align: justify;
+          text-justify: inter-word;
+        }
+        .supp-figure-legend,
+        .supp-figure-legend p {
+          font-family: "Times New Roman", Times, serif;
+          font-size: 10pt;
+          text-align: justify;
+          text-justify: inter-word;
+          line-height: 1.25;
+          margin-top: 0.35rem;
+          margin-bottom: 0.9rem;
+        }
+        .gallery-panel {
+          border: 1px solid #ddd;
+          border-radius: 6px;
+          padding: 12px;
+          margin-bottom: 16px;
+          background: #fafbfc;
+        }
+        .gallery-panel h4 {
+          margin-top: 0;
+          color: #2C3E50;
+        }
+        .manuscript-check {
+          background: #f0f7f0;
+          border-left: 4px solid #27AE60;
+          padding: 8px 12px;
+          margin: 8px 0;
+          font-size: 0.9em;
+        }
+        .manuscript-warn {
+          background: #fef7e0;
+          border-left: 4px solid #F39C12;
+          padding: 8px 12px;
+          margin: 8px 0;
+          font-size: 0.9em;
+        }
+        </style>
+  pdf:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    documentclass: article
+    pdf-engine: xelatex
+    geometry:
+      - margin=1in
+    highlight-style: kate
+    colorlinks: true
+    linkcolor: black
+    urlcolor: black
+    fig-pos: "H"
+    out-width: "100%"
+    keep-tex: false
+    latex-auto-mk: true
+    execute:
+      echo: true
+    include-in-header:
+      text: |
+        \usepackage{float}
+        % Redefine Pandoc's Shaded env with a breakable tcolorbox.
+        % The default framed/snugshade overflows (~19 ft limit) on long code blocks.
+        \definecolor{shadecolor}{HTML}{F7F7F9}
+        \definecolor{shaderule}{HTML}{D9DDE3}
+        \AtBeginDocument{%
+          \renewenvironment{Shaded}{%
+            \begin{tcolorbox}[%
+              enhanced, breakable,%
+              colback=shadecolor, colframe=shaderule,%
+              boxrule=0.4pt, arc=0pt,%
+              left=3pt, right=3pt, top=2pt, bottom=2pt,%
+              before skip=0.7em, after skip=0.7em%
+            ]%
+          }{\end{tcolorbox}}%
+        }
+        \usepackage{fancyhdr}
+        \usepackage{tcolorbox}
+        \tcbuselibrary{breakable,skins}
+        \pagestyle{fancy}
+        \fancyhf{}
+        \fancyhead[L]{\small\textit{HCM Diastology \textendash{} Supplemental Analysis}}
+        \fancyhead[R]{\small\thepage}
+        \fancyfoot[C]{\small Pepin et al.}
+        \renewcommand{\headrulewidth}{0.4pt}
+        \renewcommand{\footrulewidth}{0.2pt}
+        \setlength{\headheight}{14pt}
+        \newtcolorbox{manuscriptcheck}{
+          enhanced, breakable,
+          colback=green!5!white, colframe=green!45!black,
+          leftrule=3pt, rightrule=0.3pt, toprule=0.3pt, bottomrule=0.3pt,
+          arc=1pt, left=4pt, right=4pt, top=3pt, bottom=3pt,
+          fontupper=\small\sffamily
+        }
+        \newtcolorbox{manuscriptwarn}{
+          enhanced, breakable,
+          colback=yellow!8!white, colframe=orange!70!black,
+          leftrule=3pt, rightrule=0.3pt, toprule=0.3pt, bottomrule=0.3pt,
+          arc=1pt, left=4pt, right=4pt, top=3pt, bottom=3pt,
+          fontupper=\small\sffamily
+        }
+editor:
+  render-on-save: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup, include=FALSE}
+# ── setup: knitr opts, libs, output dirs ──────────────────────────────────────
+# cairo png @ 150 dpi; per-chunk fig.width/height override these defaults
+knitr::opts_chunk$set(
+  fig.width = 6.9,
+  fig.height = 4.5,
+  dpi = 150,
+  dev = "png",
+  dev.args = list(type = "cairo")
+)
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(purrr)
+  library(ggplot2)
+  library(patchwork)
+  library(splines)
+  library(lme4)
+  library(mgcv)
+  library(broom)
+  library(survival)
+  library(scales)
+  library(stringr)
+  library(openxlsx)
+  library(gtsummary)
+  library(flextable)
+  library(ggcorrplot)
+  library(viridis)
+  library(ggrepel)
+  library(gamlss)
+  library(nlme)
+  library(grid)
+  library(ggtext)
+  library(forcats)
+  library(MatchIt)
+  library(cobalt)
+  library(digest)
+  library(lavaan)
+})
+
+Sys.setenv(MPLCONFIGDIR = tempfile("mplconfig_"))
+
+# helpers live in R/ to keep the chunks readable
+source("R/utils.R")
+source("R/rcs_helpers.R")
+source("R/gamm_helpers.R")
+
+# excel cols often come in as character/factor; coerce without warning spam
+as_num <- \(x) suppressWarnings(as.numeric(as.character(x)))
+
+# format switches — chunks branch on these (gfm = lighter assets, no latex boxes)
+is_gfm_output <- knitr::pandoc_to("gfm") || knitr::pandoc_to("commonmark")
+is_pdf_output  <- knitr::pandoc_to("latex") || knitr::pandoc_to("pdf")
+
+# make output tree up front so writes never fail on a missing dir
+dir.create("../Manuscript/Figures", showWarnings = FALSE, recursive = TRUE)
+dir.create("../2_Output",                           recursive = TRUE, showWarnings = FALSE)
+dir.create("../2_Output/Manuscript_Main",           recursive = TRUE, showWarnings = FALSE)
+dir.create("../2_Output/Manuscript_Supplemental",   recursive = TRUE, showWarnings = FALSE)
+dir.create("../2_Output/Section_03_CrossSectional", recursive = TRUE, showWarnings = FALSE)
+dir.create("../2_Output/Section_04_Longitudinal",   recursive = TRUE, showWarnings = FALSE)
+dir.create("../2_Output/Section_05_Outcomes",       recursive = TRUE, showWarnings = FALSE)
+dir.create("../2_Output/Section_06_Ancillary",      recursive = TRUE, showWarnings = FALSE)
+```
 
 # Data Import and Cohort Assembly
 
-Three primary input files drive all analyses. `CPX_input.xlsx` contains
-cardiopulmonary exercise test records (sheet `CPX`) and longitudinal
-clinical outcomes (sheet `Outcomes_2025`). `Echo_input.xlsx` provides
-paired echocardiographic measurements linked by test date.
-`HCM_Genetics.xlsx` contains sarcomere variant results used to classify
-G+/P- carriers. All files are read directly from `../1_Input/` at render
-time with no manual pre-processing.
+Three primary input files drive all analyses. `CPX_input.xlsx` contains cardiopulmonary exercise test records (sheet `CPX`) and longitudinal clinical outcomes (sheet `Outcomes_2025`). `Echo_input.xlsx` provides paired echocardiographic measurements linked by test date. `HCM_Genetics.xlsx` contains sarcomere variant results used to classify G+/P- carriers. All files are read directly from `../1_Input/` at render time with no manual pre-processing.
 
-Data are linked by medical record number (MRN), which is immediately
-hashed to a stable integer patient ID (`ID`) to prevent downstream
-exposure of identifiable information. CPX records are restricted to
-maximal-effort tests (RER ≥ 1.0). The HCM cohort is further refined by
-applying pre-specified inclusion criteria: LV maximum wall thickness
-≥1.5 cm, apical HCM morphology, or a confirmed pathogenic sarcomere
-variant. Patients meeting none of these criteria are excluded as
-ambiguous HCM designations. Non-HCM controls are drawn from the same CPX
-registry and are confirmed to have no HCM flag in either the primary or
-secondary diagnosis fields.
+Data are linked by medical record number (MRN), which is immediately hashed to a stable integer patient ID (`ID`) to prevent downstream exposure of identifiable information. CPX records are restricted to maximal-effort tests (RER ≥ 1.0). The HCM cohort is further refined by applying pre-specified inclusion criteria: LV maximum wall thickness ≥1.5 cm, apical HCM morphology, or a confirmed pathogenic sarcomere variant. Patients meeting none of these criteria are excluded as ambiguous HCM designations. Non-HCM controls are drawn from the same CPX registry and are confirmed to have no HCM flag in either the primary or secondary diagnosis fields.
 
 ## Import and clean CPX data
 
-``` r
+```{r cpx_cleaning}
 # ── cpx import + clean ────────────────────────────────────────────────────────
 # in:  CPX sheet (1 row / test). out: CPX_clean (hcm), CPX_nonhcm_clean (controls)
 CPX <- read.xlsx("../1_Input/CPX_input.xlsx", sheet = "CPX", detectDates = TRUE)
@@ -114,11 +295,9 @@ cat(sprintf("CPX tests (HCM, adequate effort): %d tests, %d patients\n",
             nrow(CPX_clean), n_distinct(CPX_clean$ID)))
 ```
 
-    CPX tests (HCM, adequate effort): 1655 tests, 805 patients
-
 ## Comorbidity exclusions
 
-``` r
+```{r comorbidities}
 # ── comorbidity exclusions ────────────────────────────────────────────────────
 # drop pre-test CAD/COPD/ILD so exercise limitation maps to HCM, not ischemia/lung
 # NA = treat as absent (keep)
@@ -146,7 +325,7 @@ filter_flow <- bind_rows(filter_flow, tibble(
 
 ## Merge echocardiographic data
 
-``` r
+```{r echo_merge}
 # ── echo merge + HCM inclusion ────────────────────────────────────────────────
 # nearest-in-time match: m:m join on MRN, keep |cpx-echo| <= 7d, take closest echo
 # per test. then derive diastolic indices, fold in genetics, apply AHA/ACC criteria
@@ -267,7 +446,7 @@ filter_flow <- bind_rows(filter_flow, tibble(
 
 ## Baseline and longitudinal cohorts
 
-``` r
+```{r cohorts}
 # ── build analysis cohorts ────────────────────────────────────────────────────
 # baseline_df = earliest test/pt (cross-sectional); long_df = >1 test (GAMM)
 # *_nonhcm_df = control analogues
@@ -310,12 +489,9 @@ cat(sprintf(
 ))
 ```
 
-    Baseline cohort: 450 patients
-    Longitudinal repeated-test cohort: 669 observations across 218 HCM patients
-
 ## Import clinical outcomes and medications
 
-``` r
+```{r outcomes_import}
 # ── outcomes + meds ───────────────────────────────────────────────────────────
 # endpoints: composite HF (acute/chronic HF, transplant, death), transplant-free
 # variant, incident AF/flutter, all-cause death — each w/ time(yrs) + date.
@@ -475,12 +651,7 @@ stopifnot(nrow(baseline_spotcheck_df) == n_pre_join)
 cat(sprintf("Patients with outcome data: %d\nComposite HF events: %d\n",
             sum(!is.na(baseline_df$hf_composite)),
             sum(baseline_df$hf_composite == 1, na.rm = TRUE)))
-```
 
-    Patients with outcome data: 450
-    Composite HF events: 139
-
-``` r
 # ── Medication merge ─────────────────────────────────────────────────────────
 # reconcile summary "Betablocker" flag vs 9 individual drug cols: any drug=1 -> on,
 # all drugs explicitly 0 -> off, else NA. mismatches -> bb_discordant for QC. same for non-DHP CCB
@@ -562,11 +733,7 @@ cat(sprintf(
   n_long_pre_censor, n_long_post_censor,
   n_long_pts_pre_censor, n_long_pts_post_censor
 ))
-```
 
-    Post-intervention CPETs excluded from longitudinal cohort: 127 obs (669 -> 542 obs across 218 -> 176 patients)
-
-``` r
 n_pre_join <- nrow(baseline_nonhcm_df)
 baseline_nonhcm_df <- baseline_nonhcm_df %>% left_join(medications, by = c("MRN", "cpx_test_date"))
 stopifnot(nrow(baseline_nonhcm_df) == n_pre_join)
@@ -595,7 +762,7 @@ for (target_df_name in c("baseline_df", "baseline_spotcheck_df", "long_df", "bas
 
 ## Manuscript validation: Cohort counts
 
-``` r
+```{r manuscript_validation_cohort, results='asis'}
 # ── cohort sanity check ───────────────────────────────────────────────────────
 # render-time guard: counts should match the numbers in the paper (643 pts, 166
 # HF events). if upstream filters drift, the mismatch shows up here, not in review
@@ -604,44 +771,14 @@ hf_events_n <- sum(baseline_df$hf_composite == 1, na.rm = TRUE)
 hf_cohort_n <- sum(!is.na(baseline_df$hf_composite))
 
 cat("**Cohort Validation**\n\n")
-```
-
-**Cohort Validation**
-
-``` r
 cat(sprintf("- Baseline HCM cohort: **%d** patients", baseline_hcm_n))
-```
-
-- Baseline HCM cohort: **450** patients
-
-``` r
 if (baseline_hcm_n == 643) cat(" (matches manuscript)\n") else cat(sprintf(" (manuscript: 643)\n"))
-```
-
-(manuscript: 643)
-
-``` r
 cat(sprintf("- Composite HF events: **%d** in %d patients with follow-up", hf_events_n, hf_cohort_n))
-```
-
-- Composite HF events: **139** in 450 patients with follow-up
-
-``` r
 if (hf_events_n == 166) cat(" (matches manuscript)\n") else cat(sprintf(" (manuscript: 166 in 639)\n"))
-```
-
-(manuscript: 166 in 639)
-
-``` r
 n_obst_baseline <- sum(as_num(baseline_df$lvot_max_gradient) >= 30, na.rm = TRUE)
 cat(sprintf("- Obstructive HCM (LVOT ≥30 mm Hg, full cohort): **%d**, non-obstructive: **%d**\n",
             n_obst_baseline, baseline_hcm_n - n_obst_baseline))
-```
 
-- Obstructive HCM (LVOT ≥30 mm Hg, full cohort): **182**,
-  non-obstructive: **268**
-
-``` r
 # ── Longitudinal subcohort description ───────────────────────────────────────
 long_summary <- long_df %>%
   group_by(ID) %>%
@@ -668,63 +805,217 @@ q1_interval  <- quantile(long_summary$inter_test_days, 0.25, na.rm = TRUE)
 q3_interval  <- quantile(long_summary$inter_test_days, 0.75, na.rm = TRUE)
 
 cat(sprintf("\n**Longitudinal Subcohort (post-intervention censored)**\n\n"))
-```
-
-**Longitudinal Subcohort (post-intervention censored)**
-
-``` r
 cat(sprintf("- Patients: **%d** | Observations: **%d**\n", n_long_pts, n_long_obs))
-```
-
-- Patients: **176** \| Observations: **542**
-
-``` r
 cat(sprintf("- Median follow-up: **%.1f years** (IQR %.1f–%.1f)\n", med_fu, q1_fu, q3_fu))
-```
-
-- Median follow-up: **4.0 years** (IQR 2.2–6.2)
-
-``` r
 cat(sprintf("- Median CPETs per patient: **%.0f** (IQR %.0f–%.0f)\n", med_tests, q1_tests, q3_tests))
-```
-
-- Median CPETs per patient: **3** (IQR 2–4)
-
-``` r
 cat(sprintf("- Median inter-test interval: **%.0f days** (IQR %.0f–%.0f)\n",
             med_interval, q1_interval, q3_interval))
 ```
 
-- Median inter-test interval: **567 days** (IQR 414–902)
-
 ## Figure S1: CONSORT-style cohort assembly
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figure_consort_display-1.png)
+```{r figure_consort, fig.width=7.0, fig.height=8.5, include=FALSE}
+# Build a CONSORT diagram from filter_flow plus the downstream baseline /
+# longitudinal / outcomes splits. Each row of consort_steps becomes a centered
+# box; the exclusion at each step (computed as the drop in n_patients from the
+# previous row) becomes a right-hand box connected by a horizontal arrow.
 
-**Figure S1.** CONSORT-style cohort assembly flow. Each box reports the
-number of patients (and where applicable, CPET records) remaining after
-the corresponding inclusion or exclusion step. Right-hand boxes report
-the number of patients excluded at each step.
+consort_steps <- filter_flow %>%
+  mutate(
+    excluded = lag(n_patients, default = NA_integer_) - n_patients,
+    excluded = ifelse(is.na(excluded) | excluded <= 0, NA_integer_, excluded),
+    # Wrap long stage labels at ~40 characters for legibility in narrow boxes
+    stage    = stringr::str_wrap(stage, width = 42)
+  )
+
+# Append three terminal nodes representing the analytic cohorts.
+terminal <- tibble(
+  stage = c(
+    "Baseline analytic cohort\n(one CPET per patient)",
+    "Longitudinal subcohort\n(>=2 CPETs, post-intervention censored)",
+    "Outcomes cohort\n(composite endpoint follow-up)"
+  ),
+  n_tests = c(NA_integer_, nrow(long_df), NA_integer_),
+  n_patients = c(nrow(baseline_df), n_distinct(long_df$ID),
+                  sum(!is.na(baseline_df$hf_composite))),
+  excluded = NA_integer_
+)
+
+consort_all <- bind_rows(consort_steps %>% select(stage, n_tests, n_patients, excluded),
+                          terminal) %>%
+  # Top stage = highest y, bottom stage = lowest y
+  mutate(y = rev(seq_len(n())),
+         label = sprintf("%s\nn = %d patients%s",
+                         stage, n_patients,
+                         ifelse(is.na(n_tests), "",
+                                sprintf("\n(%d CPET records)", n_tests))))
+
+consort_excl <- consort_all %>%
+  filter(!is.na(excluded)) %>%
+  mutate(label = sprintf("Excluded: %d patients", excluded))
+
+box_half_height <- 0.40
+arrow_gap       <- 0.10  # vertical space between a box edge and an arrow tip
+
+p_consort <- ggplot() +
+  geom_rect(data = consort_all,
+            aes(xmin = -1.7, xmax = 1.7,
+                ymin = y - box_half_height, ymax = y + box_half_height),
+            fill = "white", color = "#2C3E50", linewidth = 0.5) +
+  geom_text(data = consort_all, aes(x = 0, y = y, label = label),
+            family = "Arial", size = 3.0, lineheight = 1.0) +
+  # Down-arrows: from the BOTTOM of each upper box to the TOP of the next box.
+  # Each non-bottom row (y > 1) draws an arrow into the row at y - 1.
+  geom_segment(data = consort_all %>% filter(y > min(y)),
+               aes(x = 0, xend = 0,
+                   y    = y - box_half_height - arrow_gap * 0.2,
+                   yend = (y - 1) + box_half_height + arrow_gap),
+               arrow = arrow(length = unit(0.18, "cm"), type = "closed"),
+               color = "#2C3E50", linewidth = 0.4) +
+  # Right-side exclusion boxes: the arrow points from the flow midpoint
+  # (between current box and next box) to the right-hand exclusion node.
+  geom_rect(data = consort_excl,
+            aes(xmin = 2.1, xmax = 4.1,
+                ymin = y - 0.5 - 0.18, ymax = y - 0.5 + 0.18),
+            fill = "#F7F1E8", color = "#A36A2B", linewidth = 0.4) +
+  geom_text(data = consort_excl, aes(x = 3.1, y = y - 0.5, label = label),
+            family = "Arial", size = 2.9, color = "#5B3A12") +
+  geom_segment(data = consort_excl,
+               aes(x = 0, xend = 2.1, y = y - 0.5, yend = y - 0.5),
+               arrow = arrow(length = unit(0.15, "cm"), type = "closed"),
+               color = "#A36A2B", linewidth = 0.35) +
+  scale_x_continuous(limits = c(-2.0, 4.3), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0.3, max(consort_all$y) + 0.7), expand = c(0, 0)) +
+  labs(title = "Figure S1. Cohort assembly flow") +
+  theme_void(base_family = "Arial") +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 11,
+                                  margin = margin(b = 6)),
+        plot.margin = margin(8, 8, 8, 8))
+
+save_jacc(p_consort, "../2_Output/FigureS1_CONSORT.pdf", w = 7.0, h = 8.5)
+save_jacc(p_consort, "../Manuscript/Figures/FigureS1_CONSORT.pdf", w = 7.0, h = 8.5)
+```
+
+```{r figure_consort_display, fig.width=7.0, fig.height=8.5, echo=FALSE}
+print(p_consort)
+```
+
+**Figure S1.** CONSORT-style cohort assembly flow. Each box reports the number of patients (and where applicable, CPET records) remaining after the corresponding inclusion or exclusion step. Right-hand boxes report the number of patients excluded at each step.
 
 ## Figure S2: Analytic causal model (DAG)
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figure_dag_display-1.png)
+```{r figure_dag, fig.width=7.5, fig.height=5.5, include=FALSE}
+# Conceptual DAG showing the assumed causal structure linking demographic
+# confounders, HCM phenotype severity, diastolic indices, medication use, and
+# the two outcome families (exercise capacity and heart-failure events).
+# Adjustment-set choices per figure are colour-coded by figure number.
 
-**Figure S2.** Conceptual DAG underlying the adjustment-set choices in
-this analysis. The latent HCM-phenotype severity node is the common
-cause of all observed diastolic markers, structural markers, and
-medication use; this is what makes over-adjustment a risk when sibling
-indicators (e.g., septal thickness + LAVi) are entered together as
-covariates. Adjustment sets per figure: **Figure 3** (cross-sectional) —
-age, sex, BMI, septal thickness, LVOT, β-blocker, non-DHP CCB,
-hypertension; **Figure 4** (trajectories) — age, sex, BMI (core); +
-medications (sensitivity); **Figure 5** (Cox) — age, sex, BMI,
-β-blocker, non-DHP CCB. Figure S3 empirically audits these edges; Figure
-S4 estimates the latent severity construct from the observed indicators.
+dag_nodes <- tibble::tribble(
+  ~name,       ~label,                 ~x,   ~y,  ~category,
+  "demog",     "Age, Sex, BMI",        0.5,  4.0, "Demographic confounder",
+  "htn",       "Hypertension",         0.5,  3.0, "Comorbid confounder",
+  "pheno",     "HCM phenotype\nseverity (latent)", 2.5, 4.0, "Disease",
+  "septal",    "Septal\nthickness",    1.7,  3.0, "Phenotype marker",
+  "lvot",      "Resting LVOT\ngradient", 3.3, 3.0, "Phenotype marker",
+  "lavi",      "LAVi",                 2.0,  2.0, "Diastolic index",
+  "ee",        "E/e'",                 2.5,  2.0, "Diastolic index",
+  "trv",       "TRVmax",               3.0,  2.0, "Diastolic index",
+  "med",       "β-blocker /\nnon-DHP CCB", 1.5, 1.0, "Treatment",
+  "vo2",       "Peak V̇O₂",            4.5,  2.5, "Exercise outcome",
+  "vevco2",    "V̇E/V̇CO₂ slope",      4.5,  1.8, "Exercise outcome",
+  "hf",        "HF composite\nendpoint", 4.5, 0.8, "Survival outcome"
+)
+
+dag_edges <- tibble::tribble(
+  ~from,    ~to,
+  "demog",  "pheno", "demog",  "lavi",  "demog",  "ee",   "demog",  "trv",
+  "demog",  "vo2",   "demog",  "vevco2","demog",  "hf",
+  "htn",    "pheno", "htn",    "lavi",  "htn",    "ee",
+  "pheno",  "septal","pheno",  "lvot",  "pheno",  "lavi", "pheno",  "ee",
+  "pheno",  "trv",   "pheno",  "vo2",   "pheno",  "vevco2","pheno", "hf",
+  "septal", "vo2",   "septal", "vevco2","septal", "hf",
+  "lvot",   "vo2",   "lvot",   "vevco2","lvot",   "hf",
+  "lavi",   "vo2",   "lavi",   "vevco2","lavi",   "hf",
+  "ee",     "vo2",   "ee",     "vevco2","ee",     "hf",
+  "trv",    "vo2",   "trv",    "vevco2","trv",    "hf",
+  "pheno",  "med",   "ee",     "med",   "lvot",   "med",
+  "med",    "vo2",   "med",    "vevco2","med",    "hf"
+)
+
+dag_edges_xy <- dag_edges %>%
+  inner_join(dag_nodes %>% select(from = name, x_from = x, y_from = y), by = "from") %>%
+  inner_join(dag_nodes %>% select(to   = name, x_to   = x, y_to   = y), by = "to") %>%
+  # Trim each segment so arrows terminate just outside the geom_label boxes
+  # instead of being hidden inside them. Per-node trim distances are tuned to
+  # match the label half-widths; targets receive a larger trim so the arrow
+  # head sits clearly in the white space before each box.
+  mutate(
+    dx      = x_to - x_from,
+    dy      = y_to - y_from,
+    edge_len = sqrt(dx^2 + dy^2),
+    ux      = dx / edge_len,
+    uy      = dy / edge_len,
+    trim_start = 0.22,
+    trim_end   = 0.40,
+    x_from = x_from + ux * trim_start,
+    y_from = y_from + uy * trim_start,
+    x_to   = x_to   - ux * trim_end,
+    y_to   = y_to   - uy * trim_end
+  ) %>%
+  select(from, to, x_from, y_from, x_to, y_to)
+
+category_palette <- c(
+  "Demographic confounder" = "#5B7B9E",
+  "Comorbid confounder"    = "#7B5B6E",
+  "Disease"                = "#8E5C59",
+  "Phenotype marker"       = "#B97E79",
+  "Diastolic index"        = "#C9A2A0",
+  "Treatment"              = "#A39556",
+  "Exercise outcome"       = "#5F869C",
+  "Survival outcome"       = "#2C3E50"
+)
+
+p_dag <- ggplot() +
+  geom_segment(data = dag_edges_xy,
+               aes(x = x_from, y = y_from, xend = x_to, yend = y_to),
+               arrow = arrow(length = unit(0.22, "cm"), type = "closed",
+                             angle = 22),
+               color = "#4A5562", linewidth = 0.45, alpha = 0.95,
+               lineend = "round") +
+  geom_label(data = dag_nodes,
+             aes(x = x, y = y, label = label, fill = category),
+             family = "Arial", size = 2.7, color = "white",
+             label.padding = unit(0.18, "lines"),
+             label.r = unit(0.12, "lines"), lineheight = 0.95) +
+  scale_fill_manual(values = category_palette, name = NULL,
+                    guide = guide_legend(ncol = 2,
+                                         keywidth = unit(0.4, "cm"),
+                                         keyheight = unit(0.3, "cm"))) +
+  scale_x_continuous(limits = c(0, 5.2), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0.3, 4.6), expand = c(0, 0)) +
+  labs(title = "Figure S2. Analytic causal model",
+       subtitle = "Conceptual DAG for the diastolic-index → outcome relationships") +
+  theme_void(base_family = "Arial") +
+  theme(plot.title    = element_text(face = "bold", hjust = 0.5, size = 11),
+        plot.subtitle = element_text(hjust = 0.5, size = 9, color = "grey30",
+                                     margin = margin(b = 8)),
+        legend.position  = "bottom",
+        legend.text = element_text(size = 8),
+        plot.margin   = margin(8, 8, 8, 8))
+
+save_jacc(p_dag, "../2_Output/FigureS2_DAG.pdf", w = 7.5, h = 5.5)
+save_jacc(p_dag, "../Manuscript/Figures/FigureS2_DAG.pdf", w = 7.5, h = 5.5)
+```
+
+```{r figure_dag_display, fig.width=7.5, fig.height=5.5, echo=FALSE}
+print(p_dag)
+```
+
+**Figure S2.** Conceptual DAG underlying the adjustment-set choices in this analysis. The latent HCM-phenotype severity node is the common cause of all observed diastolic markers, structural markers, and medication use; this is what makes over-adjustment a risk when sibling indicators (e.g., septal thickness + LAVi) are entered together as covariates. Adjustment sets per figure: **Figure 3** (cross-sectional) — age, sex, BMI, septal thickness, LVOT, β-blocker, non-DHP CCB, hypertension; **Figure 4** (trajectories) — age, sex, BMI (core); + medications (sensitivity); **Figure 5** (Cox) — age, sex, BMI, β-blocker, non-DHP CCB. Figure S3 empirically audits these edges; Figure S4 estimates the latent severity construct from the observed indicators.
 
 ## Table S_DAG: Empirical edge audit of the Figure S2 DAG
 
-``` r
+```{r dag_edge_audit, results='asis'}
 # ── DAG edge audit ────────────────────────────────────────────────────────────
 # falsification check on Fig S2: for each assumed edge src->tgt, regress tgt ~ src
 # conditioning on that edge's parents; report if the partial assoc survives.
@@ -878,35 +1169,210 @@ n_total     <- nrow(audit_rows)
 n_supported <- sum(audit_rows$Supported == "Yes", na.rm = TRUE)
 cat(sprintf("\n\n**Audit summary:** of %d testable edges in the Figure S2 DAG, %d (%.0f%%) ",
             n_total, n_supported, 100 * n_supported / n_total))
-```
-
-**Audit summary:** of 46 testable edges in the Figure S2 DAG, 10 (22%)
-
-``` r
 cat("show statistically significant conditional dependence (P < 0.05) ",
     "controlling for the target node's other assumed parents.\n")
 ```
 
-show statistically significant conditional dependence (P \< 0.05)
-controlling for the target node’s other assumed parents.
-
-**Table S_DAG.** Per-edge empirical audit of the Figure S2 DAG. For each
-measured edge A → B, B is regressed on A + demographic parents of B
-(age, sex, BMI, ± hypertension); the partial effect of A is reported. β
-for continuous targets, OR for binary. “Supported” = P \< 0.05 after
-demographic adjustment. Pairwise complete-case; N varies by edge. The
-audit tests conditional dependence, not causal direction. Latent-node
-edges are excluded.
+**Table S_DAG.** Per-edge empirical audit of the Figure S2 DAG. For each measured edge A → B, B is regressed on A + demographic parents of B (age, sex, BMI, ± hypertension); the partial effect of A is reported. β for continuous targets, OR for binary. "Supported" = P \< 0.05 after demographic adjustment. Pairwise complete-case; N varies by edge. The audit tests conditional dependence, not causal direction. Latent-node edges are excluded.
 
 ## Figure S3: Empiric Bayesian network (data-validated DAG)
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figure_bn_display-1.png)
+```{r figure_bn, fig.width=7.5, fig.height=5.5, include=FALSE}
+# Bayesian-network-style visualization: identical topology to the Figure S2
+# DAG, but edge style and weight are determined by the empirical edge audit.
+# - Solid coloured edges  : audit P < 0.05 (data supports conditional dependence)
+# - Dashed faded edges    : audit P >= 0.05 (data does not show residual dependence)
+# - Dotted dark-grey edges: edge involves the latent HCM-phenotype-severity node
+#                          (untestable from observational data; remains conceptual)
 
-**Figure S3.** Empirical Bayesian network. Same nodes and topology as
-Figure S2, edges undirected (observational dependence cannot recover
-direction). Edge style encodes the Table S_DAG audit: solid teal = P \<
-0.05, dashed grey = P ≥ 0.05, dotted grey = involves the latent node and
-is untestable.
+# Map internal DAG node names to the audit table's "pretty" labels so we can
+# look up audit p-values for each edge. The 'demog' node is a composite of
+# age / Sex / BMI; for visual classification we take the minimum p across
+# those three demographic sources for each target. The 'med' node is the
+# composite of β-blocker and non-DHP CCB use.
+node_to_audit_sources <- list(
+  demog  = c("Age", "Sex (Female)", "BMI"),
+  htn    = c("Hypertension"),
+  septal = c("Septal thickness"),
+  lvot   = c("Resting LVOT gradient"),
+  lavi   = c("LAVi"),
+  ee     = c("E/e'"),
+  trv    = c("TRVmax"),
+  med    = c("β-blocker use", "Non-DHP CCB use"),
+  vo2    = c("Peak V̇O₂"),
+  vevco2 = c("V̇E/V̇CO₂ slope"),
+  hf     = c("HF composite endpoint")
+)
+
+# Classify each DAG edge using the audit results
+edge_status <- dag_edges_xy %>%
+  rowwise() %>%
+  mutate(
+    audit_status = if (from == "pheno" || to == "pheno") {
+      "Latent (untestable)"
+    } else {
+      src_names <- node_to_audit_sources[[from]]
+      tgt_names <- node_to_audit_sources[[to]]
+      matching <- audit_rows %>%
+        filter(Source %in% src_names, Target %in% tgt_names)
+      if (!nrow(matching))                         "Not tested"
+      else if (any(matching$Supported == "Yes"))   "Supported (P < 0.05)"
+      else                                          "Not supported (P ≥ 0.05)"
+    },
+    min_p = if (from == "pheno" || to == "pheno") {
+      NA_real_
+    } else {
+      src_names <- node_to_audit_sources[[from]]
+      tgt_names <- node_to_audit_sources[[to]]
+      m <- audit_rows %>%
+        filter(Source %in% src_names, Target %in% tgt_names)
+      if (!nrow(m)) NA_real_ else min(m$p_num, na.rm = TRUE)
+    }
+  ) %>%
+  ungroup() %>%
+  mutate(
+    edge_color = case_when(
+      audit_status == "Supported (P < 0.05)"  ~ "#1F6B5E",
+      audit_status == "Not supported (P ≥ 0.05)" ~ "#BDC1C6",
+      audit_status == "Latent (untestable)" ~ "#5A6068",
+      TRUE ~ "#BDC1C6"
+    ),
+    edge_alpha = case_when(
+      audit_status == "Supported (P < 0.05)"  ~ 0.95,
+      audit_status == "Not supported (P ≥ 0.05)" ~ 0.55,
+      audit_status == "Latent (untestable)" ~ 0.75,
+      TRUE ~ 0.55
+    ),
+    edge_lty = case_when(
+      audit_status == "Supported (P < 0.05)"  ~ "solid",
+      audit_status == "Not supported (P ≥ 0.05)" ~ "22",
+      audit_status == "Latent (untestable)" ~ "44",
+      TRUE ~ "22"
+    ),
+    edge_lw = case_when(
+      audit_status == "Supported (P < 0.05)"  ~ 0.65,
+      audit_status == "Not supported (P ≥ 0.05)" ~ 0.35,
+      audit_status == "Latent (untestable)" ~ 0.45,
+      TRUE ~ 0.35
+    )
+  )
+
+# Render in plot order so supported (load-bearing) edges are drawn LAST, on top of the faded/dotted edges.
+edge_order_levels <- c("Not supported (P ≥ 0.05)", "Latent (untestable)",
+                       "Supported (P < 0.05)")
+edge_status <- edge_status %>%
+  mutate(audit_status = factor(audit_status, levels = edge_order_levels)) %>%
+  arrange(audit_status)
+
+p_bn_main <- ggplot() +
+  geom_segment(data = edge_status,
+               aes(x = x_from, y = y_from, xend = x_to, yend = y_to),
+               color = edge_status$edge_color,
+               alpha = edge_status$edge_alpha,
+               linewidth = edge_status$edge_lw,
+               linetype = edge_status$edge_lty,
+               lineend = "round") +
+  geom_label(data = dag_nodes,
+             aes(x = x, y = y, label = label, fill = category),
+             family = "Arial", size = 2.7, color = "white",
+             label.padding = unit(0.18, "lines"),
+             label.r = unit(0.12, "lines"), lineheight = 0.95) +
+  scale_fill_manual(
+    values = category_palette, name = NULL,
+    guide  = guide_legend(
+      ncol = 4, order = 1, byrow = TRUE,
+      keywidth  = unit(0.55, "cm"),
+      keyheight = unit(0.30, "cm"),
+      override.aes = list(label = "", color = NA)
+    )
+  ) +
+  scale_x_continuous(limits = c(0, 5.2), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0.3, 4.6), expand = c(0, 0)) +
+  labs(title = "Figure S3. Empirical Bayesian network") +
+  theme_void(base_family = "Arial") +
+  theme(plot.title       = element_text(face = "bold", hjust = 0.5, size = 11,
+                                        margin = margin(b = 6)),
+        legend.position  = "bottom",
+        legend.justification = "center",
+        legend.box.margin = margin(t = -4),
+        legend.spacing.x  = unit(0.15, "cm"),
+        legend.spacing.y  = unit(0.05, "cm"),
+        legend.text       = element_text(size = 8, color = "#2D3440"),
+        plot.margin       = margin(6, 8, 2, 8))
+
+# Three short, fixed-width key lines on a single horizontal row, with a centered explanatory caption below. Publication-quality: consistent fonts, generous whitespace, no overlapping elements.
+edge_key_df <- tibble::tibble(
+  x_label = c("Supported (P < 0.05)",
+              "Not supported (P ≥ 0.05)",
+              "Latent (untestable)"),
+  x_seg_start = c(0.40, 2.10, 3.85),
+  x_seg_end   = c(0.85, 2.55, 4.30),
+  x_text      = c(0.92, 2.62, 4.37),
+  edge_color = c("#1F6B5E", "#BDC1C6", "#5A6068"),
+  edge_alpha = c(0.95, 0.55, 0.75),
+  edge_lty   = c("solid", "22", "44"),
+  edge_lw    = c(0.90, 0.60, 0.70)
+)
+
+# Re-position the keys with a uniform left margin so nothing clips.
+edge_key_df <- edge_key_df %>%
+  mutate(
+    x_seg_start = c(0.95, 2.40, 3.85),
+    x_seg_end   = c(1.30, 2.75, 4.20),
+    x_text      = c(1.36, 2.81, 4.26)
+  )
+
+p_edge_legend <- ggplot() +
+  # "Edge meaning:" prefix, left-aligned on the same baseline as the keys
+  annotate("text", x = 0.10, y = 1.0,
+           label = "Edge meaning",
+           hjust = 0, vjust = 0.5, family = "Arial",
+           size = 2.8, fontface = "bold", color = "#1F2328") +
+  # Three sample edges (no arrowheads — undirected)
+  geom_segment(data = edge_key_df,
+               aes(x = x_seg_start, y = 1.0,
+                   xend = x_seg_end, yend = 1.0),
+               color = edge_key_df$edge_color,
+               alpha = edge_key_df$edge_alpha,
+               linewidth = edge_key_df$edge_lw,
+               linetype = edge_key_df$edge_lty,
+               lineend = "round") +
+  geom_text(data = edge_key_df,
+            aes(x = x_text, y = 1.0, label = x_label),
+            hjust = 0, vjust = 0.5,
+            family = "Arial", size = 2.4, color = "#2D3440") +
+  # Two-line caveat, centered beneath the keys
+  annotate("text", x = 2.6, y = 0.20,
+           label = "Edges are drawn undirected because conditional-dependence tests cannot recover causal direction from",
+           hjust = 0.5, vjust = 0.5, family = "Arial",
+           size = 2.2, color = "#5A6068") +
+  annotate("text", x = 2.6, y = -0.10,
+           label = "observational data; direction is set by domain knowledge in Figure S2.",
+           hjust = 0.5, vjust = 0.5, family = "Arial",
+           size = 2.2, color = "#5A6068") +
+  coord_cartesian(xlim = c(0, 5.2), ylim = c(-0.45, 1.55),
+                  expand = FALSE, clip = "off") +
+  theme_void(base_family = "Arial") +
+  theme(plot.margin = margin(2, 8, 6, 8))
+
+p_bn <- p_bn_main / p_edge_legend +
+  plot_layout(heights = c(6.0, 0.9))
+
+save_jacc(p_bn, "../2_Output/FigureS3_Empirical_BN.pdf", w = 7.5, h = 6.4)
+save_jacc(p_bn, "../Manuscript/Figures/FigureS3_Empirical_BN.pdf", w = 7.5, h = 6.4)
+
+bn_edge_summary <- edge_status %>%
+  count(audit_status, name = "n_edges") %>%
+  arrange(audit_status)
+write.csv(bn_edge_summary, "../2_Output/FigureS3_Empirical_BN_EdgeCounts.csv",
+          row.names = FALSE)
+```
+
+```{r figure_bn_display, fig.width=7.5, fig.height=6.4, echo=FALSE}
+print(p_bn)
+```
+
+**Figure S3.** Empirical Bayesian network. Same nodes and topology as Figure S2, edges undirected (observational dependence cannot recover direction). Edge style encodes the Table S_DAG audit: solid teal = P \< 0.05, dashed grey = P ≥ 0.05, dotted grey = involves the latent node and is untestable.
 
 <!-- ====================================================================== -->
 
@@ -920,34 +1386,62 @@ is untestable.
 
 <!-- ====================================================================== -->
 
+```{r source_remaining_analysis, child="README_HCM.Diastologyv2_body.R", eval=FALSE}
+```
+
+```{r shared_defs, include=FALSE}
+# ── Shared definitions used across all figure sections ───────────────────────
+
+diastolic_indices <- c(
+ "e_e_ave", "e_e_lat", "e_e_med", "mv_a_dur", "mv_a_point", "mv_dec_time",
+ "mv_e_a", "tr_max_vel", "la_vol_index", "med_peak_e_vel", "lat_peak_e_vel",
+ "e_prime_ave"
+)
+
+label_map <- c(
+  e_e_ave = "E/e' (avg)", e_e_lat = "E/e' (lat)",
+  e_e_med = "E/e' (med)", mv_a_dur = "MV A dur",
+  mv_a_point = "MV A point", mv_dec_time = "MV decel time",
+  mv_e_a = "MV E/A", tr_max_vel = "TRVmax",
+  la_vol_index = "LAVi", med_peak_e_vel = "Septal e'",
+  lat_peak_e_vel = "Lateral e'", e_prime_ave = "Avg e'"
+)
+
+hcm_primary_indices <- c("e_e_ave", "la_vol_index", "tr_max_vel")
+
+hcm_primary_labels <- c(
+  e_e_ave = "E/e' (average)",
+  la_vol_index = "LAVi (mL/m\u00B2)",
+  tr_max_vel = "TRVmax (cm/s)"
+)
+
+hcm_primary_units <- c(
+  e_e_ave = "", la_vol_index = " mL/m\u00B2", tr_max_vel = " cm/s"
+)
+
+ase_cutoffs_hcm <- tibble(
+  variable = hcm_primary_indices,
+  ase_cutoff = c(14, 34, 280),
+  ase_direction = c(">", ">", ">")
+)
+
+ase_cutoffs_all <- tibble(variable = diastolic_indices) %>%
+  left_join(ase_cutoffs_hcm, by = "variable")
+```
+
 <!-- ====================================================================== -->
 
 <!-- SECTION 2: FIGURE 1 - COHORT VALIDATION & MATCHED COMPARISON          -->
 
 <!-- ====================================================================== -->
 
-# Figure 1: Cohort Validation and Matched Comparison
+# Figure 1: Cohort Validation and Matched Comparison {#sec-figure1}
 
-This figure validates the HCM cohort phenotype by comparing age-, sex-,
-and BMI-matched controls (CON) to non-obstructive HCM and obstructive
-HCM (LVOT gradient ≥30 mm Hg) across six LVDD parameters. Patients with
-a confirmed pathogenic variant + wall thickness ≥ 1.3 cm are also
-classified as HCM (per AHA/ACC criteria). G+/P- carriers are excluded
-from this analysis, which were actually very few (~20 something).
+This figure validates the HCM cohort phenotype by comparing age-, sex-, and BMI-matched controls (CON) to non-obstructive HCM and obstructive HCM (LVOT gradient ≥30 mm Hg) across six LVDD parameters. Patients with a confirmed pathogenic variant + wall thickness ≥ 1.3 cm are also classified as HCM (per AHA/ACC criteria). G+/P- carriers are excluded from this analysis, which were actually very few (~20 something).
 
-We identified 1:1 controls using nearest-neighbor propensity-score
-matching (`MatchIt::matchit`, `method="nearest"`, `distance="glm"`) on
-age, sex, and BMI, with a caliper of 0.2 SD on the linear propensity
-score and no replacement. Balance is assessed by standardized mean
-differences (SMDs) before and after matching; an SMD threshold of 0.10
-is used to confirm adequate balance (`Matching_SMD_Balance.csv`). The
-six parameters compared (E/e′, LAVi, LV septal thickness, maximum LVOT
-gradient, pulmonary vein S/D ratio, and septal e′) span both ASE primary
-and supportive diastolic indices. Obstructive HCM is defined by
-**resting** LVOT gradient ≥ 30 mm Hg (provocative gradients were not
-uniformly available).
+We identified 1:1 controls using nearest-neighbor propensity-score matching (`MatchIt::matchit`, `method="nearest"`, `distance="glm"`) on age, sex, and BMI, with a caliper of 0.2 SD on the linear propensity score and no replacement. Balance is assessed by standardized mean differences (SMDs) before and after matching; an SMD threshold of 0.10 is used to confirm adequate balance (`Matching_SMD_Balance.csv`). The six parameters compared (E/e′, LAVi, LV septal thickness, maximum LVOT gradient, pulmonary vein S/D ratio, and septal e′) span both ASE primary and supportive diastolic indices. Obstructive HCM is defined by **resting** LVOT gradient ≥ 30 mm Hg (provocative gradients were not uniformly available).
 
-``` r
+```{r figure1_ase_grading, results='asis'}
 # ── ASE diastolic grading + filling-pressure class ────────────────────────────
 # 3 primary indices vs ASE cutoffs (E/e'>14, LAVi>34, TRV>280) -> combo code/class.
 # fp elevated if: >=2 primary abnl, OR 1 primary + >=1 supportive, OR (<=1 primary
@@ -1009,9 +1503,106 @@ long_df <- long_df %>%
 
 ## Figure 1: Controls
 
+```{r figure1_matched_controls, include=FALSE}
+# ── 1:1 PS-matched controls (age/sex/BMI) ─────────────────────────────────────
+# nearest-neighbor glm PS, caliper 0.2 SD, no replacement; check SMD pre/post (<0.1)
+hcm_intro_df <- baseline_df %>%
+  filter(!is.na(hcm_combo_class)) %>%
+  mutate(
+    hcm_primary_binary = factor(
+      ifelse(hcm_combo_n_abnormal == 0, "HCM (Normal diastology)", "HCM (Abnormal diastology)"),
+      levels = c("HCM (Normal diastology)", "HCM (Abnormal diastology)")
+    )
+  )
+
+nonhcm_control_pool <- baseline_nonhcm_df %>%
+  filter(!is.na(age), !is.na(Sex), !is.na(BMI))
+
+control_match <- match_controls_equal_weight(
+  case_df = hcm_intro_df,
+  control_df = nonhcm_control_pool,
+  caliper = 0.2,
+  seed = 1
+)
+
+matched_hcm_df <- control_match$cases
+matched_nonhcm_df <- control_match$controls
+
+matching_smd <- dplyr::full_join(
+  control_match$smd_pre  %>% dplyr::rename(`SMD (unmatched)` = SMD),
+  control_match$smd_post %>% dplyr::rename(`SMD (matched)`   = SMD),
+  by = "variable"
+)
+write.csv(matching_smd, "../2_Output/Matching_SMD_Balance.csv", row.names = FALSE)
+
+# Matched-cohort baseline summary (for inspection / Table 1 feed)
+matched_summary <- bind_rows(
+  matched_hcm_df %>% transmute(cohort = "HCM", age = as_num(age),
+                                Sex = as.character(Sex), BMI = as_num(BMI),
+                                lvot = as_num(lvot_max_gradient)),
+  matched_nonhcm_df %>% transmute(cohort = "CON", age = as_num(age),
+                                   Sex = as.character(Sex), BMI = as_num(BMI),
+                                   lvot = NA_real_)
+) %>%
+  group_by(cohort) %>%
+  summarise(
+    n = n(),
+    age_med = median(age, na.rm = TRUE),
+    age_q1  = quantile(age, 0.25, na.rm = TRUE),
+    age_q3  = quantile(age, 0.75, na.rm = TRUE),
+    pct_female = 100 * mean(Sex == "Female", na.rm = TRUE),
+    bmi_med = median(BMI, na.rm = TRUE),
+    bmi_q1  = quantile(BMI, 0.25, na.rm = TRUE),
+    bmi_q3  = quantile(BMI, 0.75, na.rm = TRUE),
+    lvot_med = median(lvot, na.rm = TRUE),
+    .groups = "drop"
+  )
+write.csv(matched_summary, "../2_Output/Matched_Cohort_Summary.csv", row.names = FALSE)
+
+matched_hcm_df <- matched_hcm_df %>%
+  mutate(
+    lvot_max_gradient_num = as_num(lvot_max_gradient),
+    obstructive_hcm = !is.na(lvot_max_gradient_num) & lvot_max_gradient_num >= 30,
+    figure1_hist_group = if_else(obstructive_hcm, "Obstructive HCM", "HCM")
+  )
+
+matched_nonhcm_df <- matched_nonhcm_df %>%
+  mutate(figure1_hist_group = "CON")
+
+matched_hcm_n <- nrow(matched_hcm_df)
+matched_nonhcm_n <- nrow(matched_nonhcm_df)
+hcm_normal_n <- sum(matched_hcm_df$hcm_primary_binary == "HCM (Normal diastology)", na.rm = TRUE)
+hcm_abnormal_n <- sum(matched_hcm_df$hcm_primary_binary == "HCM (Abnormal diastology)", na.rm = TRUE)
+n_hcm_obstructive <- sum(matched_hcm_df$obstructive_hcm, na.rm = TRUE)
+n_hcm_nonobstructive <- matched_hcm_n - n_hcm_obstructive
+
+case_control_hist_df <- bind_rows(
+  matched_hcm_df %>% mutate(Cohort = figure1_hist_group),
+  matched_nonhcm_df %>% mutate(Cohort = figure1_hist_group, HCM_Phenotype = NA_character_, hcm_primary_binary = NA)
+) %>%
+  mutate(Cohort = factor(Cohort, levels = c("CON", "HCM", "Obstructive HCM")))
+
+eprime_reference_df <- matched_nonhcm_df %>%
+  filter(!is.na(age), !is.na(e_prime_ave)) %>%
+  transmute(age = as.numeric(age), e_prime_ave = as.numeric(e_prime_ave))
+
+if (nrow(eprime_reference_df) >= 10) {
+  eprime_age_model <- lm(e_prime_ave ~ ns(age, df = 3), data = eprime_reference_df)
+  case_control_hist_df <- case_control_hist_df %>%
+    mutate(
+      avg_eprime_age_expected = ifelse(!is.na(age),
+        predict(eprime_age_model, newdata = tibble(age = as.numeric(age))), NA_real_),
+      avg_eprime_age_cal = e_prime_ave - avg_eprime_age_expected
+    )
+} else {
+  case_control_hist_df <- case_control_hist_df %>%
+    mutate(avg_eprime_age_expected = NA_real_, avg_eprime_age_cal = NA_real_)
+}
+```
+
 ## Figure 1: Export
 
-``` r
+```{r figure1_plot, fig.width=7.2, fig.height=5.0, results='asis'}
 # ── Fig 1: CON vs nonobstructive vs obstructive HCM across 6 LVDD params ───────
 # assemble plot df, then build/save the multi-panel comparison figure
 validation_df <- case_control_hist_df %>%
@@ -1319,11 +1910,6 @@ show_and_save_jacc(
   w = figure1_export_width,
   h = figure1_export_height
 )
-```
-
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figure1_plot-1.png)
-
-``` r
 save_jacc(
   p_validate_row,
   "../Manuscript/Figures/Figure1_MatchedControls_and_BaselineCharacteristics_Preprint.pdf",
@@ -1368,53 +1954,74 @@ save_jacc_with_embedded_legend(
 )
 
 cat(sprintf("\n::: {.manuscript-check}\n**Figure 1 Validation**\n\n"))
-```
-
-<div class="manuscript-check">
-
-**Figure 1 Validation**
-
-``` r
 cat(sprintf("- Matched HCM: **%d**, CON: **%d**", matched_hcm_n, matched_nonhcm_n))
-```
-
-- Matched HCM: **409**, CON: **409**
-
-``` r
 if (matched_hcm_n == 583 && matched_nonhcm_n == 583) cat(" (matches manuscript)\n") else cat(sprintf(" (manuscript: 583/583)\n"))
-```
-
-(manuscript: 583/583)
-
-``` r
 cat(sprintf("- HCM normal diastology: **%d**, abnormal: **%d**\n", hcm_normal_n, hcm_abnormal_n))
-```
-
-- HCM normal diastology: **208**, abnormal: **201**
-
-``` r
 cat(sprintf("- Obstructive HCM (LVOT ≥30 mm Hg): **%d**\n", n_hcm_obstructive))
-```
-
-- Obstructive HCM (LVOT ≥30 mm Hg): **168**
-
-``` r
 cat(sprintf("- Non-obstructive HCM: **%d**\n", n_hcm_nonobstructive))
-```
-
-- Non-obstructive HCM: **241**
-
-``` r
 cat(":::\n")
 ```
 
-</div>
-
 ## Density
+
+```{r figure1_supplemental_density, include=FALSE}
+# Supplemental Figure S: Density distributions (moved from main Figure 1 per reviewer request).
+# Wall-thickness panels use per-cohort x-limits: HCM left-thresholded at 1.3 cm,
+# non-HCM right-thresholded at 1.5 cm, carriers bounded < 1.3 cm.
+wt_cohort_xlims <- list(
+  "HCM"             = c(1.3, 4.0),
+  "Obstructive HCM" = c(1.3, 4.0),
+  "CON"             = c(0.0, 1.5)
+)
+
+p_density_row <- (
+  make_hcm_validation_density(validation_df, "lv_max_wall_thickness", "Max Wall Thickness", "cm",
+                              bins = 30, show_y = TRUE,
+                              x_limits = c(0, 3.5), x_breaks = c(0, 1, 2, 3),
+                              per_cohort_xlims = wt_cohort_xlims) |
+  make_hcm_validation_density(validation_df, "lv_septal_thickness", "IVSd", "cm",
+                              bins = 30,
+                              x_limits = c(0, 3.5), x_breaks = c(0, 1, 2, 3),
+                              per_cohort_xlims = wt_cohort_xlims) |
+  make_hcm_validation_density(validation_df, "avg_eprime_age_cal", "Age-calibrated e'",
+                              "Observed \u2212 age-expected (cm/s)", bins = 28, show_legend = TRUE)
+) / (
+  make_hcm_validation_density(validation_df, "lvot_max_gradient", "LVOT Gradient", "mm Hg",
+                              bins = 30, show_y = TRUE,
+                              x_limits = c(0, 150), x_breaks = c(0, 50, 100, 150)) |
+  make_hcm_validation_density(validation_df, "la_vol_index", "LAVi", "mL/m\u00b2",
+                              bins = 30,
+                              x_limits = c(0, 75), x_breaks = c(0, 25, 50, 75)) |
+  make_hcm_validation_density(validation_df, "ef_modsp4", "LVEF", "%",
+                              bins = 28,
+                              x_limits = c(40, 85), x_breaks = c(40, 50, 60, 70, 80))
+) +
+  plot_layout(heights = c(1, 1), widths = c(1, 1, 1)) +
+  plot_annotation(tag_levels = "A", tag_prefix = "(", tag_suffix = ")") &
+  theme(plot.tag = element_text(face = "bold", size = 11))
+
+save_jacc(p_density_row, "../2_Output/FigureS_Figure1_Density.pdf",
+          w = 7.2, h = 3.7)
+save_jacc(p_density_row, "../Manuscript/Figures/FigureS_Figure1_Density.pdf",
+          w = 7.2, h = 3.7)
+```
 
 ## Figure 1: Abstract Figure
 
-``` r
+```{r figure1_visual_abstract, include=FALSE}
+# Standalone vectorized export of Figure 1C (age-calibrated e') for visual abstract / PowerPoint
+p_fig1c_export <- make_hcm_validation_scatter(
+  validation_df, "avg_eprime_age_cal",
+  "Age-calibrated e\u2019", "Observed \u2212 age-expected (cm/s)",
+  show_y = TRUE, show_legend = TRUE
+)
+ggsave("../2_Output/VisualAbstract_1C_eprime.svg", plot = p_fig1c_export,
+       width = 2.4, height = 3.5, device = "svg")
+ggsave("../2_Output/VisualAbstract_1C_eprime.pdf", plot = p_fig1c_export,
+       width = 2.4, height = 3.5, device = cairo_pdf)
+```
+
+```{r figure1_eprime_stats, results='asis'}
 # Kruskal-Wallis test: age-calibrated average e' across Non-HCM / Carrier / HCM groups
 eprime_kw_df <- validation_df %>%
   filter(!is.na(avg_eprime_age_cal), !is.na(Cohort)) %>%
@@ -1441,42 +2048,16 @@ if (requireNamespace("dunn.test", quietly = TRUE)) {
 }
 
 cat("\n::: {.manuscript-check}\n**Age-calibrated e′ Group Comparison (Figure 1 Panel C)**\n\n")
-```
-
-<div class="manuscript-check">
-
-**Age-calibrated e′ Group Comparison (Figure 1 Panel C)**
-
-``` r
 cat(sprintf("- Kruskal-Wallis P = **%s** (3-group overall)\n", p_eprime_kw_fmt))
-```
-
-- Kruskal-Wallis P = **3.29 × 10⁻⁴⁰** (3-group overall)
-
-``` r
 if (!is.null(dunn_tbl)) {
   for (i in seq_len(nrow(dunn_tbl))) {
     cat(sprintf("- Dunn %s: P~adj~ = **%s**\n", dunn_tbl$comparison[i], dunn_tbl$p_fmt[i]))
   }
 }
-```
-
-- Dunn CON - HCM: P<sub>adj</sub> = **8.59 × 10⁻²⁶**
-- Dunn CON - Obstructive HCM: P<sub>adj</sub> = **2.58 × 10⁻³²**
-- Dunn HCM - Obstructive HCM: P<sub>adj</sub> = **1.89 × 10⁻²**
-
-``` r
 cat(":::\n")
 ```
 
-</div>
-
-**Figure 1.** Matched cohort baseline distributions. Age-, sex-, and
-BMI-matched controls (CON; gray) versus non-obstructive HCM (rose) and
-obstructive HCM (LVOT gradient ≥30 mm Hg; steel blue). Panels show
-kernel density estimates with horizontally oriented boxplots and
-individual observations for wall thickness, septal thickness,
-age-calibrated average e$'$, LVOT gradient, LAVi, and LVEF.
+**Figure 1.** Matched cohort baseline distributions. Age-, sex-, and BMI-matched controls (CON; gray) versus non-obstructive HCM (rose) and obstructive HCM (LVOT gradient ≥30 mm Hg; steel blue). Panels show kernel density estimates with horizontally oriented boxplots and individual observations for wall thickness, septal thickness, age-calibrated average e$'$, LVOT gradient, LAVi, and LVEF.
 
 ------------------------------------------------------------------------
 
@@ -1486,18 +2067,11 @@ age-calibrated average e$'$, LVOT gradient, LAVi, and LVEF.
 
 <!-- ====================================================================== -->
 
-# Figure 2: HCM Primary-Parameter Phenotypes
+# Figure 2: HCM Primary-Parameter Phenotypes {#sec-figure2}
 
-To avoid collapsing HCM diastolic physiology into a binary label, we
-categorized baseline LVDD according to the observed combination of the 3
-HCM-relevant primary parameters available in this dataset: average
-E/e$'$ \>14, left atrial volume index (LAVi) \>34 mL/m$^2$, and peak
-tricuspid regurgitation velocity (TRV$_{max}$) \>2.8 m/s. These
-variables were selected because they correspond to the principal
-HCM-related markers highlighted in the 2025 ASE update for special
-populations.
+To avoid collapsing HCM diastolic physiology into a binary label, we categorized baseline LVDD according to the observed combination of the 3 HCM-relevant primary parameters available in this dataset: average E/e$'$ \>14, left atrial volume index (LAVi) \>34 mL/m$^2$, and peak tricuspid regurgitation velocity (TRV$_{max}$) \>2.8 m/s. These variables were selected because they correspond to the principal HCM-related markers highlighted in the 2025 ASE update for special populations.
 
-``` r
+```{r figure2_phenotypes, fig.width=7.2, fig.height=8.1, results='asis'}
 # ── Panel A: UpSet plot of primary parameter combinations ────────────────────
 df_combo <- baseline_df %>% filter(!is.na(hcm_combo_class))
 combo_palette <- c(
@@ -1913,11 +2487,7 @@ show_and_save_jacc(
   w = figure2_main_width,
   h = figure2_main_height
 )
-```
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figure2_phenotypes-1.png)
-
-``` r
 legend_fig2_pdf <- paste0(
   "**Figure 2. Baseline HCM Diastolic Dysfunction Phenotypes and Cardiopulmonary Performance.** ",
   "**(A)** UpSet plot of the distinct combinations of abnormal diastolic dysfunction parameters ",
@@ -1959,79 +2529,22 @@ save_jacc(
 
 # ── Manuscript validation ────────────────────────────────────────────────────
 cat("**Figure 2 Validation**\n\n")
-```
-
-**Figure 2 Validation**
-
-``` r
 fig2_combo_counts <- table(df_combo$hcm_combo_class)
 cat(sprintf("- None abnormal: **%d** (manuscript: 327)\n", fig2_combo_counts["None abnormal"]))
-```
-
-- None abnormal: **208** (manuscript: 327)
-
-``` r
 cat(sprintf("- E/e' only: **%d** (manuscript: 54)\n", fig2_combo_counts["E/e' only"]))
-```
-
-- E/e’ only: **39** (manuscript: 54)
-
-``` r
 cat(sprintf("- LAVi only: **%d** (manuscript: 96)\n", fig2_combo_counts["LAVi only"]))
-```
-
-- LAVi only: **79** (manuscript: 96)
-
-``` r
 cat(sprintf("- TRVmax only: **%d** (manuscript: 18)\n", fig2_combo_counts["TRVmax only"]))
-```
-
-- TRVmax only: **12** (manuscript: 18)
-
-``` r
 cat(sprintf("- E/e' + LAVi: **%d** (manuscript: 60)\n", fig2_combo_counts["E/e' + LAVi"]))
-```
-
-- E/e’ + LAVi: **50** (manuscript: 60)
-
-``` r
 cat(sprintf("- E/e' + TRVmax: **%d** (manuscript: 5)\n", fig2_combo_counts["E/e' + TRVmax"]))
-```
-
-- E/e’ + TRVmax: **4** (manuscript: 5)
-
-``` r
 cat(sprintf("- LAVi + TRVmax: **%d** (manuscript: 14)\n", fig2_combo_counts["LAVi + TRVmax"]))
-```
-
-- LAVi + TRVmax: **10** (manuscript: 14)
-
-``` r
 cat(sprintf("- All 3 abnormal: **%d** (manuscript: 9)\n", fig2_combo_counts["All 3 abnormal"]))
-```
-
-- All 3 abnormal: **7** (manuscript: 9)
-
-``` r
 cat(sprintf("\n- %s KW p = **%s** (manuscript: 0.94)\n", label_peak_vo2_md, p_box_kw_p))
-```
-
-- Peak V̇O$_2$ KW p = **0.88** (manuscript: 0.94)
-
-``` r
 cat(sprintf("- %s KW p = **%s** (manuscript: 4.4e-11)\n", label_vevco2_md, p_vevco2_kw_p))
 ```
 
-- V̇E/V̇CO$_2$ slope KW p = **2.9e-06** (manuscript: 4.4e-11)
+**Figure 2. Baseline HCM Primary-Parameter Phenotypes and Cardiopulmonary Performance.** **(A)** UpSet plot illustrating the distinct combinations of abnormal diastolic dysfunction parameters in HCM. **(B)** Prevalence of diastolic indices. **(C)** Peak V̇O$_2$ and **(D)** V̇E/V̇CO$_2$ slope by combination phenotype, with Kruskal-Wallis P values.
 
-**Figure 2. Baseline HCM Primary-Parameter Phenotypes and
-Cardiopulmonary Performance.** **(A)** UpSet plot illustrating the
-distinct combinations of abnormal diastolic dysfunction parameters in
-HCM. **(B)** Prevalence of diastolic indices. **(C)** Peak V̇O$_2$ and
-**(D)** V̇E/V̇CO$_2$ slope by combination phenotype, with Kruskal-Wallis P
-values.
-
-``` r
+```{r figure2_stratified_table, results='asis'}
 # ── table: baseline characteristics by diastolic phenotype combo ──────────────
 tbl_ase <- baseline_df %>%
   filter(!is.na(hcm_combo_class)) %>%
@@ -2092,40 +2605,64 @@ if (!is_gfm_output) {
 # Table_ASE2025 export removed — not part of the manuscript
 ```
 
-# Figure 3: Cross-Sectional RCS Analysis
+# Figure 3: Cross-Sectional RCS Analysis {#sec-figure3}
 
-To determine whether LVDD is associated with cardiopulmonary fitness
-across the three primary HCM diastolic indices (E/e′, LAVi, and
-TRV$_max$) and primary cardiopulmonary exercise outcomes: Peak V̇O$_2$
-(FRIEND 2.0 % predicted) and V̇E/V̇CO$_2$ sl, we used restricted cubic
-splines (RCS) with 4 knots placed at the 5th, 35th, 65th, and 95th
-percentiles of each diastolic index (Hmisc default), adjusted for the
-following factors: age, sex, BMI, LV septal thickness, maximum LVOT
-gradient, β-blocker use, non-DHP calcium channel blocker use, and
-hypertension.
+To determine whether LVDD is associated with cardiopulmonary fitness across the three primary HCM diastolic indices (E/e′, LAVi, and TRV$_max$) and primary cardiopulmonary exercise outcomes: Peak V̇O$_2$ (FRIEND 2.0 % predicted) and V̇E/V̇CO$_2$ sl, we used restricted cubic splines (RCS) with 4 knots placed at the 5th, 35th, 65th, and 95th percentiles of each diastolic index (Hmisc default), adjusted for the following factors: age, sex, BMI, LV septal thickness, maximum LVOT gradient, β-blocker use, non-DHP calcium channel blocker use, and hypertension. 
 
-Nonlinearity was formally evaluated by comparing the full spline model
-to a covariate-only linear model via LRT; both the overall P-value and
-the nonlinearity Q-value (Benjamini–Hochberg-adjusted across
-index–outcome pairs) were reported within each panel.
+Nonlinearity was formally evaluated by comparing the full spline model to a covariate-only linear model via LRT; both the overall P-value and the nonlinearity Q-value (Benjamini–Hochberg-adjusted across index–outcome pairs) were reported within each panel. 
 
-Lastly, and as a secondary descriptor of nonlinearity, a single-knot
-piecewise (broken-line) model is also fit with the breakpoint selected
-by AIC across 41 candidate values; because this knot is data-selected,
-its significance is reported as a parametric-bootstrap p-value (2,000
-simulations under the null of linearity), not the uncorrected anova
-F-test.
+Lastly, and as a secondary descriptor of nonlinearity, a single-knot piecewise (broken-line) model is also fit with the breakpoint selected by AIC across 41 candidate values; because this knot is data-selected, its significance is reported as a parametric-bootstrap p-value (2,000 simulations under the null of linearity), not the uncorrected anova F-test.
 
-Sparsely sampled tails (below the 2nd or above the 98th percentile of
-each index) are masked to prevent extrapolation artefacts. Complete-case
-analysis is used; per-model N is annotated in each panel for
-verification.
+Sparsely sampled tails (below the 2nd or above the 98th percentile of each index) are masked to prevent extrapolation artefacts. Complete-case analysis is used; per-model N is annotated in each panel for verification.
 
 ## RCS Helpers
 
+```{r figure3_helpers, include=FALSE}
+# ── Fig 3 setup: adjustment sets + analytic subsets ───────────────────────────
+# two subsets: cross_sectional_analysis_df (core adj, broader N) and
+# figure3_model_df (+ med covariates, complete-case on meds). need >=1 primary index
+rcs_adjustment_vars <- c("age", "Sex", "BMI", "lv_septal_thickness", "lvot_max_gradient")
+rcs_adjustment_numeric <- c("age", "BMI", "lv_septal_thickness", "lvot_max_gradient")
+figure3_adjustment_covariates <- c("bb_any", "ndhp_ccb_any", "htn_pre_test")
+figure3_adjustment_vars <- c(rcs_adjustment_vars, figure3_adjustment_covariates)
+figure3_adjustment_numeric <- c(rcs_adjustment_numeric, figure3_adjustment_covariates)
+figure3_adjustment_label <- "age, sex, BMI, LV septal thickness, max LVOT gradient, \u03B2-blocker use, non-DHP CCB use, and hypertension"
+
+cross_sectional_analysis_df <- baseline_df %>%
+  mutate(
+    across(any_of(c("age", "BMI", "VO2_FRIEND2_PP", "VeVco2_slope", "HRR", hcm_primary_indices)),
+           ~ as_num(.)),
+    Sex = factor(Sex, levels = c("Male", "Female")),
+    n_primary_indices_available = rowSums(across(all_of(hcm_primary_indices), ~ !is.na(.x))),
+    eligible_cross_sectional_vo2 = !is.na(VO2_FRIEND2_PP) & n_primary_indices_available > 0,
+    eligible_cross_sectional_vevco2 = !is.na(VeVco2_slope) & n_primary_indices_available > 0,
+    eligible_cross_sectional_hrr = !is.na(HRR) & n_primary_indices_available > 0,
+    eligible_cross_sectional_any = eligible_cross_sectional_vo2 | eligible_cross_sectional_vevco2 | eligible_cross_sectional_hrr
+  ) %>%
+  filter(!is.na(age), !is.na(Sex), !is.na(BMI), eligible_cross_sectional_any)
+
+write.csv(cross_sectional_analysis_df, "../2_Output/Data_CrossSectional_Analysis.csv", row.names = FALSE)
+
+figure3_model_df <- baseline_df %>%
+  mutate(
+    across(any_of(c("age", "BMI", "VO2_FRIEND2_PP", "VeVco2_slope", "HRR", hcm_primary_indices, figure3_adjustment_covariates)),
+           ~ as_num(.)),
+    Sex = factor(Sex, levels = c("Male", "Female"))
+  ) %>%
+  filter(
+    med_data_available == 1,
+    if_all(all_of(figure3_adjustment_covariates), ~ !is.na(.x)),
+    !is.na(age),
+    !is.na(Sex),
+    !is.na(BMI)
+  )
+
+cat(sprintf("Figure 3 HCM analytic subset: %d patients\n", nrow(figure3_model_df)))
+```
+
 ## Restricted Cubic Spline Models
 
-``` r
+```{r figure3_models, fig.width=7.0, fig.height=8.6, results='asis'}
 # ── cross-sectional RCS: index -> exercise outcome ────────────────────────────
 # restricted cubic spline (4 knots) per primary index, adjusted; LRT tests overall
 # assoc + nonlinearity. fit per outcome, then build the multi-panel curve figure
@@ -2329,13 +2866,56 @@ if (length(friend2_panels) == 3 && length(vevco2_panels) == 3) {
 }
 ```
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figure3_models-1.png)
-
 ## Figure 3: Abstract export
+
+```{r figure3_visual_abstract, include=FALSE}
+# Standalone vectorized exports of Figure 3B (LAVi x Peak VO2) and 3E (LAVi x VE/VCO2)
+# for visual abstract / PowerPoint - stats box removed, 2.4 x 3.5" to match Figure 1C
+
+lavi_idx <- "la_vol_index"
+
+if (!is.null(figure3_vo2$pred_curves) && nrow(figure3_vo2$pred_curves) > 0) {
+  y_lim_vo2 <- range(c(figure3_vo2$pred_curves$lo, figure3_vo2$pred_curves$hi), na.rm = TRUE)
+  p_fig3b_export <- make_rcs_panel(
+    pred_df      = filter(figure3_vo2$pred_curves, var == lavi_idx),
+    idx          = lavi_idx,
+    y_label      = label_peak_vo2_friend_plot,
+    line_color   = jacc_cols["navy"],
+    fill_color   = jacc_cols["blue"],
+    y_limits     = y_lim_vo2,
+    show_y       = TRUE,
+    stats_label  = NULL,
+    piecewise_df = filter(figure3_vo2$piecewise_lines, var == lavi_idx)
+  )
+  ggsave("../2_Output/VisualAbstract_3B_LAVi_VO2.svg", plot = p_fig3b_export,
+         width = 2.4, height = 3.5, device = "svg")
+  ggsave("../2_Output/VisualAbstract_3B_LAVi_VO2.pdf", plot = p_fig3b_export,
+         width = 2.4, height = 3.5, device = cairo_pdf)
+}
+
+if (!is.null(figure3_vevco2$pred_curves) && nrow(figure3_vevco2$pred_curves) > 0) {
+  y_lim_vevco2 <- range(c(figure3_vevco2$pred_curves$lo, figure3_vevco2$pred_curves$hi), na.rm = TRUE)
+  p_fig3e_export <- make_rcs_panel(
+    pred_df      = filter(figure3_vevco2$pred_curves, var == lavi_idx),
+    idx          = lavi_idx,
+    y_label      = label_vevco2_title_plot,
+    line_color   = jacc_cols["red"],
+    fill_color   = jacc_cols["orange"],
+    y_limits     = y_lim_vevco2,
+    show_y       = TRUE,
+    stats_label  = NULL,
+    piecewise_df = filter(figure3_vevco2$piecewise_lines, var == lavi_idx)
+  )
+  ggsave("../2_Output/VisualAbstract_3E_LAVi_VeVco2.svg", plot = p_fig3e_export,
+         width = 2.4, height = 3.5, device = "svg")
+  ggsave("../2_Output/VisualAbstract_3E_LAVi_VeVco2.pdf", plot = p_fig3e_export,
+         width = 2.4, height = 3.5, device = cairo_pdf)
+}
+```
 
 ## LRTs and Curvature Statistics
 
-``` r
+```{r figure3_summary_table, results='asis'}
 # ── table: Fig 3 RCS LRT stats (overall + nonlinearity P per index/outcome) ───
 figure3_summary_table_raw <- bind_rows(
   figure3_vo2$lrt_table %>% mutate(Outcome = label_peak_vo2_friend_pred),
@@ -2396,34 +2976,14 @@ write.csv(figure3_summary_table, "../2_Output/Table2_Figure3_RCS_Summary.csv", r
 figure3_ft %>% save_as_docx(path = "../2_Output/Table2_Figure3_RCS_Summary.docx")
 ```
 
-``` r
+```{r figure3_validation, results='asis'}
 # ── Fig 3 sanity check: print analytic N + key effect sizes ───────────────────
 cat("**Figure 3 Validation**\n\n")
-```
-
-**Figure 3 Validation**
-
-``` r
 cat(sprintf("- Exact-date medication-adjusted analytic subset: **%d** patients\n", nrow(figure3_model_df)))
-```
-
-- Exact-date medication-adjusted analytic subset: **244** patients
-
-``` r
 cat(sprintf("- Adjustment set: **%s**\n", figure3_adjustment_label))
-```
 
-- Adjustment set: **age, sex, BMI, LV septal thickness, max LVOT
-  gradient, β-blocker use, non-DHP CCB use, and hypertension**
-
-``` r
 # ── Cross-correlation of diastolic indices ─────────────────────────────────
 cat("\n**Diastolic index pairwise correlations (Spearman):**\n\n")
-```
-
-**Diastolic index pairwise correlations (Spearman):**
-
-``` r
 corr_df <- figure3_model_df %>%
   select(any_of(hcm_primary_indices)) %>%
   mutate(across(everything(), ~ as_num(.)))
@@ -2437,20 +2997,9 @@ for (pr in pairs) {
                 rho, nrow(complete)))
   }
 }
-```
 
-- E/e’ (average) vs LAVi (mL/m²): r = 0.322 (n = 164)
-- E/e’ (average) vs TRVmax (cm/s): r = 0.410 (n = 102)
-- LAVi (mL/m²) vs TRVmax (cm/s): r = 0.338 (n = 104)
-
-``` r
 # ── Per-model sample sizes ─────────────────────────────────────────────────
 cat("\n**Per-model sample sizes:**\n\n")
-```
-
-**Per-model sample sizes:**
-
-``` r
 for (outcome_name in c("VO2_FRIEND2_PP", "VeVco2_slope")) {
   result <- switch(outcome_name,
     VO2_FRIEND2_PP = figure3_vo2,
@@ -2463,16 +3012,7 @@ for (outcome_name in c("VO2_FRIEND2_PP", "VeVco2_slope")) {
     }
   }
 }
-```
 
-- VO2_FRIEND2_PP ~ E/e’ (average): n = 135
-- VO2_FRIEND2_PP ~ LAVi (mL/m²): n = 124
-- VO2_FRIEND2_PP ~ TRVmax (cm/s): n = 95
-- VeVco2_slope ~ E/e’ (average): n = 135
-- VeVco2_slope ~ LAVi (mL/m²): n = 124
-- VeVco2_slope ~ TRVmax (cm/s): n = 95
-
-``` r
 # ── Verify hypertension covariate is present ───────────────────────────────
 cat(sprintf("\n- Hypertension (htn_pre_test) available: **%s** (non-missing: %d / %d)\n",
             ifelse("htn_pre_test" %in% names(figure3_model_df), "yes", "NO"),
@@ -2480,48 +3020,19 @@ cat(sprintf("\n- Hypertension (htn_pre_test) available: **%s** (non-missing: %d 
             nrow(figure3_model_df)))
 ```
 
-- Hypertension (htn_pre_test) available: **yes** (non-missing: 244 /
-  244)
-
 ## Supplemental OMARX Threshold Discovery
 
-Because the abnormality thresholds are used as the assumed hingepoint
-for the RCS, we applied a custom multivariate adaptive regression spline
-(MARS) workflow, called OMARX, to explore data-driven thresholds beyond
-guideline-defined cut points. THe primary models used age, sex, BMI,
-E/e’, LAVi, TRVmax, septal e’, LV septal thickness, and LVOT gradient;
-these were complete-case, with additive, TR-missingness, LVOT-binary,
-imputed-predictor, and protected-clinical-knot sensitivity analyses used
-to evaluate stability.
+Because the abnormality thresholds are used as the assumed hingepoint for the RCS, we applied a custom multivariate adaptive regression spline (MARS) workflow, called OMARX, to explore data-driven thresholds beyond guideline-defined cut points. THe primary models used age, sex, BMI, E/e', LAVi, TRVmax, septal e', LV septal thickness, and LVOT gradient; these were complete-case, with additive, TR-missingness, LVOT-binary, imputed-predictor, and protected-clinical-knot sensitivity analyses used to evaluate stability.
 
-These produced only modest explanatory performance in the primary
-complete-case models (n=108 for each primary outcome). For peak V̇O2, the
-primary model explained only a limited proportion of the variance
-(R^2=0.162; adjusted R^2=0.085), and age and BMI were the dominant
-retained contributors, with no protected ASE-aligned diastolic knot
-retained. For V̇E/V̇CO2 slope, the primary MARS model similarly showed
-modest fit (R^2=0.122; adjusted R^2=0.041), with female sex, LV septal
-thickness, and TRVmax contributing more than the primary
-filling-pressure parameters in the complete-case model.
+These produced only modest explanatory performance in the primary complete-case models (n=108 for each primary outcome). For peak V̇O2, the primary model explained only a limited proportion of the variance (R\^2=0.162; adjusted R\^2=0.085), and age and BMI were the dominant retained contributors, with no protected ASE-aligned diastolic knot retained. For V̇E/V̇CO2 slope, the primary MARS model similarly showed modest fit (R\^2=0.122; adjusted R\^2=0.041), with female sex, LV septal thickness, and TRVmax contributing more than the primary filling-pressure parameters in the complete-case model.
 
-Nevertheless, sensitivity analyses suggested partial consistency with
-ASE thresholds. In additive and imputed models, LAVi knots emerged near
-the clinical threshold (approximately 33.9 to 35.9 mL/m^2), and
-protected-clinical-knot models for V̇E/V̇CO2 slope retained E/e’ at 14,
-LAVi at 34 mL/m^2, and TRVmax at 280 cm/s. Taken together, these
-supplemental analyses did not identify a robust alternative threshold
-structure that outperformed the guideline-based framework, but they were
-broadly compatible with the existing ASE cut points.
+Nevertheless, sensitivity analyses suggested partial consistency with ASE thresholds. In additive and imputed models, LAVi knots emerged near the clinical threshold (approximately 33.9 to 35.9 mL/m\^2), and protected-clinical-knot models for V̇E/V̇CO2 slope retained E/e' at 14, LAVi at 34 mL/m\^2, and TRVmax at 280 cm/s. Taken together, these supplemental analyses did not identify a robust alternative threshold structure that outperformed the guideline-based framework, but they were broadly compatible with the existing ASE cut points.
 
 ## Sensitivity: V̇E/V̇CO₂ Analyses Including Submaximal Tests (All-RER)
 
-This sensitivity analysis repeats the primary cross-sectional RCS models
-using all HCM CPETs regardless of peak respiratory exchange ratio (RER ≥
-1.0). V̇E/V̇CO₂ slope is physiologically interpretable at submaximal
-effort; this analysis confirms whether the primary associations are
-robust to inclusion of tests that did not achieve a peak RER ≥ 1.0.
+This sensitivity analysis repeats the primary cross-sectional RCS models using all HCM CPETs regardless of peak respiratory exchange ratio (RER ≥ 1.0). V̇E/V̇CO₂ slope is physiologically interpretable at submaximal effort; this analysis confirms whether the primary associations are robust to inclusion of tests that did not achieve a peak RER ≥ 1.0.
 
-``` r
+```{r sensitivity_rer, results='asis'}
 # Build all-RER HCM baseline cohort using pipeline objects already in scope
 CPX_hcm_allrer_raw <- CPX_with_id %>%
   filter(
@@ -2565,12 +3076,7 @@ cat(sprintf(
   nrow(baseline_allrer_df) - nrow(baseline_df),
   nrow(baseline_df)
 ))
-```
 
-All-RER sensitivity cohort: 489 HCM patients (+39 vs. primary RER≥1.0
-cohort of 450)
-
-``` r
 # Analytic subset for models — mirror figure3_model_df from all-RER cohort
 figure3_model_allrer_df <- baseline_allrer_df %>%
   mutate(
@@ -2623,18 +3129,7 @@ print(knitr::kable(
   sensitivity_comparison_tbl,
   caption = "Table S: Sensitivity — V̇E/V̇CO₂ ~ diastolic index RCS LRT, primary (RER ≥1.0) vs. all-RER cohort"
 ))
-```
 
-| Parameter      | N (RER ≥1.0) | P (RER ≥1.0) | N (all RER) | P (all RER) |
-|:---------------|-------------:|:-------------|------------:|:------------|
-| LAVi (mL/m²)   |          124 | \<0.001      |         141 | 0.010       |
-| TRVmax (cm/s)  |           95 | \<0.001      |         113 | 0.012       |
-| E/e’ (average) |          135 | 0.003        |         153 | 0.004       |
-
-Table S: Sensitivity — V̇E/V̇CO₂ ~ diastolic index RCS LRT, primary (RER
-≥1.0) vs. all-RER cohort
-
-``` r
 write.csv(
   sensitivity_comparison_tbl,
   "../2_Output/Sensitivity_AllRER_VeVco2_LRT.csv",
@@ -2642,57 +3137,67 @@ write.csv(
 )
 ```
 
-# Figure 4: Longitudinal GAMM Trajectories
+# Figure 4: Longitudinal GAMM Trajectories {#sec-figure4}
 
-This section reproduces the manuscript longitudinal analyses examining
-whether baseline diastolic dysfunction severity predicts the trajectory
-of cardiopulmonary fitness across serial CPX tests. Patients with at
-least one follow-up CPX test after the baseline visit are included in
-the longitudinal cohort.
+This section reproduces the manuscript longitudinal analyses examining whether baseline diastolic dysfunction severity predicts the trajectory of cardiopulmonary fitness across serial CPX tests. Patients with at least one follow-up CPX test after the baseline visit are included in the longitudinal cohort.
 
-**Statistical approach.** Generalized additive mixed models (GAMM,
-implemented via `mgcv::gamm` with REML estimation) are used to model
-Peak V̇O$_2$ and V̇E/V̇CO$_2$ slope as functions of time from baseline CPX.
-Within-patient correlation is modelled by a per-patient random intercept
-and random slope on `time_yrs`
-(`random = list(ID_fac = pdDiag(~ 1 + time_yrs))`). For binary
-diastolic-status models, the trajectory deviation between abnormal and
-normal patients is captured by a varying-coefficient smooth,
-`s(time_yrs, by = status_binary_ord, bs = "cr", k = 5)`, using an
-ordered factor so that the by-smooth represents the difference smooth
-(Abnormal vs Normal). For continuous baseline-severity models, a
-tensor-interaction smooth
-`ti(time_yrs, baseline_var, bs = c("cr", "cr"), k = c(5, 4))` is used to
-model the time × baseline interaction with main effects removed.
-P-values for trajectory differences are derived from the smooth-term F
-statistic of the difference / tensor smooth. The previous
-implementation, which used `mgcv::bam` with a random-intercept smooth
-and a `ti()` tensor with a random-effect margin on the binary status
-axis, was found to penalize the interaction smooth to effective df ≈ 0
-in many sensitivity models; the varying-coefficient parameterization
-with explicit lme random effects eliminates this degeneracy.
+**Statistical approach.** Generalized additive mixed models (GAMM, implemented via `mgcv::gamm` with REML estimation) are used to model Peak V̇O$_2$ and V̇E/V̇CO$_2$ slope as functions of time from baseline CPX. Within-patient correlation is modelled by a per-patient random intercept and random slope on `time_yrs` (`random = list(ID_fac = pdDiag(~ 1 + time_yrs))`). For binary diastolic-status models, the trajectory deviation between abnormal and normal patients is captured by a varying-coefficient smooth, `s(time_yrs, by = status_binary_ord, bs = "cr", k = 5)`, using an ordered factor so that the by-smooth represents the difference smooth (Abnormal vs Normal). For continuous baseline-severity models, a tensor-interaction smooth `ti(time_yrs, baseline_var, bs = c("cr", "cr"), k = c(5, 4))` is used to model the time × baseline interaction with main effects removed. P-values for trajectory differences are derived from the smooth-term F statistic of the difference / tensor smooth. The previous implementation, which used `mgcv::bam` with a random-intercept smooth and a `ti()` tensor with a random-effect margin on the binary status axis, was found to penalize the interaction smooth to effective df ≈ 0 in many sensitivity models; the varying-coefficient parameterization with explicit lme random effects eliminates this degeneracy.
 
-**Age normalization.** Peak V̇O$_2$ is expressed as FRIEND 2.0 %
-predicted at each visit, providing built-in adjustment for age, sex, and
-BMI across follow-up. LAVi is additionally z-scored using GAMLSS
-(generalized additive models for location, scale, and shape) estimated
-from the HCM baseline cohort with sex-stratified smooth splines on age.
-The resulting Z-score is a **within-HCM** reference: Z = 0 corresponds
-to the average HCM patient of the same age and sex, not a healthy
-normal. This cohort-internal Z-score is used as a continuous prognostic
-predictor and is interpreted as deviation within the HCM distribution.
+**Age normalization.** Peak V̇O$_2$ is expressed as FRIEND 2.0 % predicted at each visit, providing built-in adjustment for age, sex, and BMI across follow-up. LAVi is additionally z-scored using GAMLSS (generalized additive models for location, scale, and shape) estimated from the HCM baseline cohort with sex-stratified smooth splines on age. The resulting Z-score is a **within-HCM** reference: Z = 0 corresponds to the average HCM patient of the same age and sex, not a healthy normal. This cohort-internal Z-score is used as a continuous prognostic predictor and is interpreted as deviation within the HCM distribution.
 
-**Visualization.** Predicted trajectories are shown at the 25th, 50th,
-and 75th percentiles of each baseline diastolic parameter to illustrate
-the dose-response relationship over time. Binary (abnormal vs. normal,
-using ASE thresholds) trajectory models are retained as supplemental
-figures for direct comparison with the primary continuous analyses.
+**Visualization.** Predicted trajectories are shown at the 25th, 50th, and 75th percentiles of each baseline diastolic parameter to illustrate the dose-response relationship over time. Binary (abnormal vs. normal, using ASE thresholds) trajectory models are retained as supplemental figures for direct comparison with the primary continuous analyses.
 
 ## GAMLSS Z-Score Derivation
 
+```{r figure4_gamlss_zscore, include=FALSE}
+# ── age/sex-referenced LAVi Z-scores (GAMLSS) ─────────────────────────────────
+# model both mean (mu) and SD (sigma) as smooth fns of age + sex via pb() splines,
+# then z = (obs - mu_hat)/sigma_hat. falls back to plain scale() if the fit fails.
+# these z-scores feed the Cox models downstream
+derive_lavi_gamlss_results <- function(df) {
+  z_dat <- df %>%
+    transmute(
+      ID,
+      age = suppressWarnings(as.numeric(age)),
+      Sex = factor(Sex),
+      la_vol_index = suppressWarnings(as.numeric(la_vol_index))
+    ) %>%
+    filter(!is.na(ID), !is.na(age), !is.na(Sex), !is.na(la_vol_index))
+
+  if (nrow(z_dat) == 0) {
+    return(list(la_vol_index = list(model = NULL, data = tibble(ID = numeric(), seamlss_z = numeric()))))
+  }
+
+  fit_obj <- tryCatch(
+    gamlss(
+      la_vol_index ~ pb(age) + Sex,
+      sigma.formula = ~ pb(age) + Sex,
+      family = NO,
+      data = z_dat,
+      trace = FALSE
+    ),
+    error = function(e) NULL
+  )
+
+  if (!is.null(fit_obj)) {
+    mu_hat <- fitted(fit_obj, what = "mu")
+    sigma_hat <- pmax(fitted(fit_obj, what = "sigma"), 1e-6)
+    z_dat$seamlss_z <- (z_dat$la_vol_index - mu_hat) / sigma_hat
+  } else {
+    z_dat$seamlss_z <- as.numeric(scale(z_dat$la_vol_index))
+  }
+
+  list(la_vol_index = list(model = fit_obj, data = z_dat %>% select(ID, seamlss_z)))
+}
+
+# Derive z-scores from HCM baseline data
+gamlss_combined_baseline <- baseline_df
+gamlss_results <- derive_lavi_gamlss_results(gamlss_combined_baseline)
+```
+
 ## Continuous GAMM Trajectory Panels
 
-``` r
+```{r figure4_gamm, fig.width=7.2, fig.height=5.2, results='asis'}
 # ── Fig 4: GAMM trajectories of exercise capacity by baseline diastolic burden ─
 # mixed GAM (smooth time x stratum + random patient intercept) on the repeated-
 # test cohort. stratify by baseline LVDD burden (#abnormal indices) and by each
@@ -2877,11 +3382,6 @@ figure4_legend_fontsize <- 9
 
 show_and_save_jacc(fig4, "../2_Output/Figure4_Longitudinal_GAMM.pdf",
                    w = figure4_main_width, h = figure4_main_height)
-```
-
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figure4_gamm-1.png)
-
-``` r
 save_jacc(fig4, "../Manuscript/Figures/Figure4_Longitudinal_GAMM_Preprint.pdf",
           w = figure4_preprint_width, h = figure4_preprint_height)
 save_jacc(fig4, "../2_Output/Figure4_Longitudinal_GAMM_Preprint.pdf",
@@ -2907,13 +3407,33 @@ save_jacc_with_embedded_legend(fig4, "../Manuscript/Figures/Figure4_Longitudinal
 save_jacc_with_embedded_legend(fig4, "../2_Output/Figure4_Longitudinal_GAMM.pdf",
   legend_text = legend_fig4_pdf, w = figure4_main_width, h = figure4_main_height,
   legend_fontsize = figure4_legend_fontsize)
+
 ```
 
 ## Figure 4 abstract output
 
+```{r figure4_visual_abstract, include=FALSE}
+# Standalone vectorized export of Figure 4E (VE/VCO2 x LAVi trajectory) for visual abstract / PowerPoint
+# stats_label = NULL removes the GAMM statistics box present in the main figure
+p_fig4e_export <- make_continuous_trajectory_panel(
+  figure4_main_results[["VeVco2_slope"]][["la_vol_index"]],
+  y_label     = label_vevco2_title_plot,
+  y_limits    = figure4_main_vevco2_limits,
+  title       = "(E) LAVi",
+  show_y      = TRUE,
+  show_x      = TRUE,
+  show_legend = TRUE,
+  stats_label = NULL
+)
+ggsave("../2_Output/VisualAbstract_4E_LAVi_VeVco2.svg", plot = p_fig4e_export,
+       width = 2.4, height = 3.2, device = "svg")
+ggsave("../2_Output/VisualAbstract_4E_LAVi_VeVco2.pdf", plot = p_fig4e_export,
+       width = 2.4, height = 3.2, device = cairo_pdf)
+```
+
 ## Model Summaries
 
-``` r
+```{r figure4_summary_table, results='asis'}
 # ── table: GAMM smooth-term stats per index (primary, core-adjusted models) ────
 figure4_summary_table_raw <- bind_rows(
   bind_rows(lapply(figure4_index_specs, function(spec) {
@@ -2980,7 +3500,7 @@ figure4_ft %>% save_as_docx(path = "../2_Output/Table3_Figure4_GAMM_Summary.docx
 
 ## Complete Model Statistics
 
-``` r
+```{r figure4_complete_table, results='asis'}
 # ── table: full GAMM coefficients (parametric + smooth) across all indices ─────
 figure4_complete_table_raw <- bind_rows(
   bind_rows(lapply(figure4_index_specs, function(spec) {
@@ -3062,7 +3582,7 @@ write.csv(figure4_complete_table, "../2_Output/TableS_Figure4_GAMM_Complete.csv"
 figure4_complete_ft %>% save_as_docx(path = "../2_Output/TableS_Figure4_GAMM_Complete.docx")
 ```
 
-``` r
+```{r figure4_validation, results='asis'}
 # ── Fig 4 sanity check: GAMM N, EDF, time-smooth P per panel ──────────────────
 figure4_validation_row <- function(result, outcome_label, parameter_label) {
   if (is.null(result)) return(NULL)
@@ -3093,11 +3613,6 @@ figure4_main_validation_df <- bind_rows(
 )
 
 cat("**Figure 4 Validation (Main Continuous Quartile Analysis)**\n\n")
-```
-
-**Figure 4 Validation (Main Continuous Quartile Analysis)**
-
-``` r
 for (i in seq_len(nrow(figure4_main_validation_df))) {
   row_i <- figure4_main_validation_df[i, ]
   cat(sprintf(
@@ -3105,35 +3620,13 @@ for (i in seq_len(nrow(figure4_main_validation_df))) {
     row_i$Outcome, row_i$Parameter, row_i$Observations, row_i$Patients, row_i$Quartiles
   ))
 }
-```
-
-- Peak V̇O2 \| E/e’: **370 observations across 125 patients**; quartile
-  patients = **Q1 (lowest): 32, Q2: 31, Q3: 31, Q4 (highest): 31**
-- Peak V̇O2 \| LAVi: **328 observations across 112 patients**; quartile
-  patients = **Q1 (lowest): 28, Q2: 28, Q3: 28, Q4 (highest): 28**
-- Peak V̇O2 \| TRVmax: **312 observations across 100 patients**; quartile
-  patients = **Q1 (lowest): 25, Q2: 25, Q3: 25, Q4 (highest): 25**
-- V̇E/V̇CO2 slope \| E/e’: **368 observations across 125 patients**;
-  quartile patients = **Q1 (lowest): 32, Q2: 31, Q3: 31, Q4 (highest):
-  31**
-- V̇E/V̇CO2 slope \| LAVi: **327 observations across 112 patients**;
-  quartile patients = **Q1 (lowest): 28, Q2: 28, Q3: 28, Q4 (highest):
-  28**
-- V̇E/V̇CO2 slope \| TRVmax: **311 observations across 100 patients**;
-  quartile patients = **Q1 (lowest): 25, Q2: 25, Q3: 25, Q4 (highest):
-  25**
-
-``` r
 cat(sprintf("- Baseline LAVi Z-score derivation available for downstream Cox models: **%s**\n",
             ifelse(nrow(z_source) > 0, "yes", "no")))
 ```
 
-- Baseline LAVi Z-score derivation available for downstream Cox models:
-  **yes**
-
 ## Supplemental Figures: Parameter-Specific Binary Trajectories
 
-``` r
+```{r figureS_diastolic_continuous, fig.width=7.2, fig.height=3.2, results='asis'}
 # ── Fig S: GAMM trajectories split by each binary index (supplement to Fig 4) ──
 for (spec in figure4_index_specs) {
   result <- build_binary_subfigure(spec)
@@ -3176,11 +3669,9 @@ for (spec in figure4_index_specs) {
 }
 ```
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figureS_diastolic_continuous-1.png)![](README_HCM_Manuscript_V2_files/figure-commonmark/figureS_diastolic_continuous-2.png)![](README_HCM_Manuscript_V2_files/figure-commonmark/figureS_diastolic_continuous-3.png)
-
 ## Supplemental Figure: Unadjusted LAVi Binary GAMM
 
-``` r
+```{r figureS_lavi_unadjusted_gamm, fig.width=7.2, fig.height=3.2, results='asis'}
 # ── Fig S: unadjusted LAVi GAMM (shows covariate adjustment isn't driving signal)
 figure4_unadjusted_main <- build_binary_subfigure(
   figure4_main_spec,
@@ -3210,11 +3701,9 @@ if (!is.null(figure4_unadjusted_main)) {
 }
 ```
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figureS_lavi_unadjusted_gamm-1.png)
-
 ## Supplemental Table: Figure 4 GAMM Sensitivity Analysis
 
-``` r
+```{r figure4_sensitivity_table, results='asis'}
 # ── table: GAMM sensitivity across adjustment sets (core vs +meds vs ...) ──────
 figure4_sensitivity_table_raw <- bind_rows(lapply(figure4_model_sets, function(model_set) {
   bind_rows(
@@ -3312,7 +3801,7 @@ figure4_sensitivity_ft %>% save_as_docx(path = "../2_Output/TableS_Figure4_GAMM_
 
 ## Supplemental Table: Figure 4 Covariate Coefficients
 
-``` r
+```{r figure4_covariate_table, results='asis'}
 # ── table: parametric covariate effects (age/sex/BMI/...) from the GAMMs ───────
 figure4_covariate_table_raw <- bind_rows(
   bind_rows(lapply(figure4_index_specs, function(spec) {
@@ -3385,58 +3874,21 @@ write.csv(figure4_covariate_table, "../2_Output/TableS_Figure4_GAMM_Covariates.c
 figure4_covariate_ft %>% save_as_docx(path = "../2_Output/TableS_Figure4_GAMM_Covariates.docx")
 ```
 
-# Figure 5: Heart Failure Outcomes
+# Figure 5: Heart Failure Outcomes {#sec-figure5}
 
-This section reproduces the time-to-event analyses from the manuscript.
-The baseline CPX test date serves as the origin for all follow-up
-calculations. The primary composite endpoint comprises all-cause
-mortality, acute decompensated heart failure hospitalization, and heart
-transplantation - whichever occurs first. Follow-up is censored at the
-date of last clinical encounter for patients who did not experience an
-endpoint event.
+This section reproduces the time-to-event analyses from the manuscript. The baseline CPX test date serves as the origin for all follow-up calculations. The primary composite endpoint comprises all-cause mortality, acute decompensated heart failure hospitalization, and heart transplantation - whichever occurs first. Follow-up is censored at the date of last clinical encounter for patients who did not experience an endpoint event.
 
-**Co-primary endpoints.** Two co-primary diastolic predictors are
-pre-specified for the composite endpoint: (i) the LAVi cohort-internal
-GAMLSS Z-score entered as a continuous standardized variable, and (ii)
-the composite “elevated filling pressure” classifier (binary). Inference
-for each co-primary uses a Bonferroni-adjusted α = 0.025; all other
-parameter-specific Cox models (E/e′, TRVmax, LVOT gradient, septal
-thickness, peak V̇O₂, V̇E/V̇CO₂ Z-scores) are considered secondary /
-exploratory and are reported alongside without formal correction.
+**Co-primary endpoints.** Two co-primary diastolic predictors are pre-specified for the composite endpoint: (i) the LAVi cohort-internal GAMLSS Z-score entered as a continuous standardized variable, and (ii) the composite "elevated filling pressure" classifier (binary). Inference for each co-primary uses a Bonferroni-adjusted α = 0.025; all other parameter-specific Cox models (E/e′, TRVmax, LVOT gradient, septal thickness, peak V̇O₂, V̇E/V̇CO₂ Z-scores) are considered secondary / exploratory and are reported alongside without formal correction.
 
-**Kaplan-Meier analysis.** Event-free survival curves are stratified by
-the individual ASE threshold crossings for E/e′ (\>14), LAVi (\>34
-mL/m²), and TRV$_max$ (\>2.8 m/s), as well as the composite diastolic
-dysfunction classification (any vs. no primary parameter abnormal).
-Log-rank test P values are reported for each stratification.
+**Kaplan-Meier analysis.** Event-free survival curves are stratified by the individual ASE threshold crossings for E/e′ (\>14), LAVi (\>34 mL/m²), and TRV$_max$ (\>2.8 m/s), as well as the composite diastolic dysfunction classification (any vs. no primary parameter abnormal). Log-rank test P values are reported for each stratification.
 
-**Cox models.** Multivariable Cox proportional-hazards models are
-adjusted for age, sex, BMI, β-blocker use, and non-DHP calcium channel
-blocker use. Each diastolic parameter is entered as a continuous
-standardized predictor (Z-score, per 1 SD higher) to facilitate
-cross-parameter comparison of hazard ratios. For the peak V̇O₂ Z-score,
-the sign is reversed (`scale(-V̇O₂)`) so that hazard ratios \> 1
-consistently indicate worse prognosis (lower fitness); this is noted in
-all table footnotes. Proportional-hazards assumptions are tested via the
-scaled-Schoenfeld-residual chi-square test (`survival::cox.zph`); global
-and per-covariate results are reported in a supplemental table. Models
-with PH violation are flagged for cautious interpretation.
+**Cox models.** Multivariable Cox proportional-hazards models are adjusted for age, sex, BMI, β-blocker use, and non-DHP calcium channel blocker use. Each diastolic parameter is entered as a continuous standardized predictor (Z-score, per 1 SD higher) to facilitate cross-parameter comparison of hazard ratios. For the peak V̇O₂ Z-score, the sign is reversed (`scale(-V̇O₂)`) so that hazard ratios \> 1 consistently indicate worse prognosis (lower fitness); this is noted in all table footnotes. Proportional-hazards assumptions are tested via the scaled-Schoenfeld-residual chi-square test (`survival::cox.zph`); global and per-covariate results are reported in a supplemental table. Models with PH violation are flagged for cautious interpretation.
 
-**Sensitivity analyses.** Two pre-specified sensitivity analyses are
-run: (1) a medication-adjusted model that additionally adjusts for
-baseline medication burden, and (2) an intervention-censored model that
-censors patients at the time of major invasive procedures (septal
-reduction surgery, alcohol septal ablation, or heart transplantation) to
-isolate the prognostic effect of diastolic dysfunction independent of
-treatment escalation. A Fine-Gray competing-risks model was considered
-but is not used here; instead, intervention-censoring provides the
-principal mechanism for distinguishing prognostic from
-treatment-mediated effects. Sensitivity results are displayed inline
-below the primary analyses.
+**Sensitivity analyses.** Two pre-specified sensitivity analyses are run: (1) a medication-adjusted model that additionally adjusts for baseline medication burden, and (2) an intervention-censored model that censors patients at the time of major invasive procedures (septal reduction surgery, alcohol septal ablation, or heart transplantation) to isolate the prognostic effect of diastolic dysfunction independent of treatment escalation. A Fine-Gray competing-risks model was considered but is not used here; instead, intervention-censoring provides the principal mechanism for distinguishing prognostic from treatment-mediated effects. Sensitivity results are displayed inline below the primary analyses.
 
 ## Kaplan-Meier Curves and Cox Models
 
-``` r
+```{r figure5_survival, fig.width=7.0, fig.height=6.8, results='asis'}
 # ── Fig 5: Cox PH for composite HF endpoint ───────────────────────────────────
 # time = test -> event/censor (yrs); censor at last encounter. predictors scaled
 # to interpretable units (per 10 mmHg, per 0.5cm, per SD z) so HRs are comparable.
@@ -3492,18 +3944,9 @@ cat(sprintf("Outcomes cohort: N=%d, events=%d (%.1f%%), censored=%d\n",
     outcomes_fu_summary$n_total, outcomes_fu_summary$n_events,
     100 * outcomes_fu_summary$n_events / outcomes_fu_summary$n_total,
     outcomes_fu_summary$n_censored))
-```
-
-Outcomes cohort: N=447, events=136 (30.4%), censored=311
-
-``` r
 cat(sprintf("Median follow-up: %.1f years (IQR %.1f–%.1f)\n",
     outcomes_fu_summary$med_fu, outcomes_fu_summary$q1_fu, outcomes_fu_summary$q3_fu))
-```
 
-Median follow-up: 4.7 years (IQR 1.4–7.9)
-
-``` r
 fig5_palette <- c(
   reference = "#C4CBD3",
   highlight = "#C88B8B",
@@ -3816,11 +4259,9 @@ DEE
 }
 ```
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figure5_survival-1.png)
-
 ## Supplemental Table: Proportional-Hazards Diagnostics
 
-``` r
+```{r figure5_ph_diagnostics, results='asis'}
 # Schoenfeld-residual test for proportional-hazards assumption on each Cox
 # model fit in Figure 5. Reports global and per-covariate chi-square p-values.
 # If the global test rejects PH at alpha = 0.05 for a key diastolic
@@ -3875,9 +4316,6 @@ if (!is_gfm_output) {
 }
 
 cat("\n\n")
-```
-
-``` r
 if (length(ph_violations) > 0) {
   cat(sprintf("**Proportional-hazards violations detected** in the following model(s): %s. ",
               paste(ph_violations, collapse = ", ")))
@@ -3889,17 +4327,11 @@ if (length(ph_violations) > 0) {
 }
 ```
 
-**No global PH violations detected** (all global tests P \>= 0.05).
-Hazard ratios are interpretable as time-constant effects.
-
-Schoenfeld-residual chi-square test results for each fitted Cox model.
-The GLOBAL row reports the overall test of the proportional-hazards
-assumption; per-covariate rows test PH for individual predictors. A
-small p-value (\< 0.05) indicates evidence against time-constant hazard.
+Schoenfeld-residual chi-square test results for each fitted Cox model. The GLOBAL row reports the overall test of the proportional-hazards assumption; per-covariate rows test PH for individual predictors. A small p-value (\< 0.05) indicates evidence against time-constant hazard.
 
 ## Supplemental Table: Figure 5E Cox Model Summary
 
-``` r
+```{r figure5_summary_table, results='asis'}
 # ── table: Cox HRs (95% CI, P) for each predictor/endpoint ────────────────────
 figure5_summary_table_raw <- bind_rows(
   if (!is.null(cox_fp)) {
@@ -4099,16 +4531,168 @@ figure5_summary_ft %>% save_as_docx(path = "../2_Output/TableS_Figure5_Cox_Summa
 
 ## Figure S4: Two-factor latent severity (confirmatory factor analysis)
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figure_cfa_display-1.png)
+```{r figure_cfa, fig.width=7.5, fig.height=6.0, include=FALSE}
+# ── Fig S4: 2-factor CFA for latent HCM severity ──────────────────────────────
+# splits the 5 echo markers into a structural factor (septal, LVOT) and a
+# diastolic factor (LAVi, E/e', TRV); std.lv + FIML missing. report fit indices,
+# factor scores feed the sensitivity Cox. complete-case on all 5 markers
+cfa_df <- baseline_df %>%
+  transmute(
+    ID,
+    lv_septal_thickness = as_num(lv_septal_thickness),
+    lvot_max_gradient   = as_num(lvot_max_gradient),
+    la_vol_index        = as_num(la_vol_index),
+    e_e_ave             = as_num(e_e_ave),
+    tr_max_vel          = as_num(tr_max_vel)
+  ) %>%
+  filter(if_all(-ID, ~ !is.na(.x)))
 
-**Figure S4.** Two-factor confirmatory factor analysis estimating the
-latent HCM-severity construct (Figure S2). Standardised loadings shown
-on each path; the dashed curve connects the two latent factors with
-their estimated correlation. The structural factor is degenerate (septal
-loading ≈ 0); the diastolic factor is well-identified (all three
-loadings P \< 0.001).
+# Two-factor CFA: structural and diastolic latent severity factors
+## First factor is the structural component
+## Second factor is LVDD
+cfa_model_2f <- '
+  structural =~ lv_septal_thickness + lvot_max_gradient
+  diastolic  =~ la_vol_index + e_e_ave + tr_max_vel
+'
+fit_2f <- lavaan::cfa(cfa_model_2f, data = cfa_df,
+                      std.lv = TRUE, missing = "ML")
 
-``` r
+fit_2f_idx <- lavaan::fitMeasures(
+  fit_2f, c("chisq", "df", "pvalue", "cfi", "tli", "rmsea",
+            "rmsea.ci.lower", "rmsea.ci.upper", "srmr"))
+
+cfa_fit_table <- tibble::tibble(
+  `chi-sq`    = round(fit_2f_idx["chisq"], 2),
+  df          = unname(fit_2f_idx["df"]),
+  `P value`   = ifelse(fit_2f_idx["pvalue"] < 0.001, "<0.001",
+                       sprintf("%.3f", fit_2f_idx["pvalue"])),
+  CFI         = round(fit_2f_idx["cfi"], 3),
+  TLI         = round(fit_2f_idx["tli"], 3),
+  RMSEA       = sprintf("%.3f (%.3f-%.3f)",
+                        fit_2f_idx["rmsea"],
+                        fit_2f_idx["rmsea.ci.lower"],
+                        fit_2f_idx["rmsea.ci.upper"]),
+  SRMR        = round(fit_2f_idx["srmr"], 3)
+)
+write.csv(cfa_fit_table, "../2_Output/TableS_CFA_FitIndices.csv", row.names = FALSE)
+
+# Standardized loadings from the two-factor model
+cfa_loadings <- lavaan::standardizedSolution(fit_2f) %>%
+  filter(op == "=~") %>%
+  transmute(Latent_factor = lhs,
+            Indicator     = rhs,
+            `Std. loading` = round(est.std, 3),
+            SE            = round(se, 3),
+            Z             = round(z, 2),
+            `P value`     = ifelse(pvalue < 0.001, "<0.001", sprintf("%.3f", pvalue)),
+            `95% CI`      = sprintf("(%.3f, %.3f)", ci.lower, ci.upper))
+write.csv(cfa_loadings, "../2_Output/TableS_CFA_Loadings.csv", row.names = FALSE)
+
+# Factor scores per patient (one row per ID with both severity scores)
+factor_scores <- as.data.frame(lavaan::lavPredict(fit_2f))
+factor_scores$ID <- cfa_df$ID
+factor_scores <- factor_scores %>%
+  transmute(ID,
+            structural_severity = structural,
+            diastolic_severity  = diastolic)
+write.csv(factor_scores, "../2_Output/CFA_Factor_Scores.csv", row.names = FALSE)
+
+# ── Path diagram: two latent factors → indicators with std loadings ──
+indicator_labels <- c(
+  lv_septal_thickness = "Septal thickness",
+  lvot_max_gradient   = "Resting LVOT",
+  la_vol_index        = "LAVi",
+  e_e_ave             = "E/e'",
+  tr_max_vel          = "TRVmax"
+)
+factor_color <- c(structural = "#8E5C59", diastolic = "#5F869C")
+
+path_nodes <- tibble::tribble(
+  ~name,                    ~x,   ~y,   ~kind,        ~factor,
+  "structural",             1.0,  3.5,  "latent",     "structural",
+  "diastolic",              3.5,  3.5,  "latent",     "diastolic",
+  "lv_septal_thickness",    0.3,  1.2,  "indicator",  "structural",
+  "lvot_max_gradient",      1.7,  1.2,  "indicator",  "structural",
+  "la_vol_index",           2.7,  1.2,  "indicator",  "diastolic",
+  "e_e_ave",                3.7,  1.2,  "indicator",  "diastolic",
+  "tr_max_vel",             4.7,  1.2,  "indicator",  "diastolic"
+)
+path_nodes <- path_nodes %>%
+  mutate(label = ifelse(kind == "latent",
+                         ifelse(name == "structural",
+                                "Structural\nseverity",
+                                "Diastolic\nseverity"),
+                         unname(indicator_labels[name])))
+
+loading_lookup <- cfa_loadings %>%
+  transmute(factor = Latent_factor, indicator = Indicator, loading = `Std. loading`)
+
+path_edges <- path_nodes %>%
+  filter(kind == "indicator") %>%
+  inner_join(path_nodes %>% filter(kind == "latent") %>%
+               select(factor, x_lat = x, y_lat = y, name_lat = name),
+             by = "factor") %>%
+  left_join(loading_lookup, by = c("factor", "name" = "indicator")) %>%
+  mutate(
+    label_loading = sprintf("%.2f", loading),
+    edge_color    = factor_color[factor],
+    edge_lw       = pmax(0.3, 1.2 * abs(loading))
+  )
+
+cor_2f <- lavaan::standardizedSolution(fit_2f) %>%
+  filter(op == "~~", lhs == "structural", rhs == "diastolic") %>%
+  pull(est.std)
+cor_label <- sprintf("r = %.2f", cor_2f)
+
+p_cfa <- ggplot() +
+  geom_segment(data = path_edges,
+               aes(x = x_lat, y = y_lat - 0.30, xend = x, yend = y + 0.22),
+               color = path_edges$edge_color, linewidth = path_edges$edge_lw,
+               alpha = 0.75, lineend = "round") +
+  geom_text(data = path_edges,
+            aes(x = (x_lat + x) / 2 + 0.08, y = (y_lat + y) / 2,
+                label = label_loading),
+            family = "Arial", size = 2.5, color = "#2D3440") +
+  geom_curve(aes(x = 1.55, y = 3.5, xend = 2.95, yend = 3.5),
+             curvature = -0.25, color = "#5A6068", linewidth = 0.4,
+             linetype = "dashed") +
+  annotate("text", x = 2.25, y = 4.0, label = cor_label,
+           family = "Arial", size = 2.7, color = "#1F2328", fontface = "italic") +
+  geom_label(data = path_nodes %>% filter(kind == "latent"),
+             aes(x = x, y = y, label = label, fill = factor),
+             family = "Arial", size = 3.0, color = "white",
+             label.padding = unit(0.45, "lines"),
+             label.r = unit(1.0, "lines"), fontface = "bold",
+             lineheight = 0.95) +
+  geom_label(data = path_nodes %>% filter(kind == "indicator"),
+             aes(x = x, y = y, label = label),
+             family = "Arial", size = 2.5, color = "#1F2328",
+             fill = "white", label.padding = unit(0.20, "lines"),
+             label.r = unit(0.10, "lines"), lineheight = 0.95) +
+  scale_fill_manual(values = factor_color, guide = "none") +
+  scale_x_continuous(limits = c(-0.2, 5.4), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0.5, 4.5), expand = c(0, 0)) +
+  labs(title = "Figure S4. Two-factor latent-severity measurement model",
+       subtitle = sprintf("Standardised loadings; CFI = %.3f, RMSEA = %.3f, SRMR = %.3f",
+                          fit_2f_idx["cfi"], fit_2f_idx["rmsea"], fit_2f_idx["srmr"])) +
+  theme_void(base_family = "Arial") +
+  theme(plot.title    = element_text(face = "bold", size = 11, hjust = 0.5,
+                                     margin = margin(b = 3)),
+        plot.subtitle = element_text(size = 9, color = "grey30", hjust = 0.5,
+                                     margin = margin(b = 6)),
+        plot.margin   = margin(8, 8, 8, 8))
+
+save_jacc(p_cfa, "../2_Output/FigureS4_CFA.pdf", w = 7.5, h = 4.0)
+save_jacc(p_cfa, "../Manuscript/Figures/FigureS4_CFA.pdf", w = 7.5, h = 4.0)
+```
+
+```{r figure_cfa_display, fig.width=7.5, fig.height=4.0, echo=FALSE}
+print(p_cfa)
+```
+
+**Figure S4.** Two-factor confirmatory factor analysis estimating the latent HCM-severity construct (Figure S2). Standardised loadings shown on each path; the dashed curve connects the two latent factors with their estimated correlation. The structural factor is degenerate (septal loading ≈ 0); the diastolic factor is well-identified (all three loadings P \< 0.001).
+
+```{r figure_cfa_cox_sensitivity, results='asis'}
 # Sensitivity Cox: latent severity factor scores substituted for individual
 # Z-scores. Adjusted for age, Sex, BMI, BB, non-DHP CCB.
 surv_cfa_df <- surv_df %>%
@@ -4142,12 +4726,6 @@ write.csv(cfa_cox_tab %>% select(-p_num),
 
 cat(sprintf("**Table S_CFA_Cox.** Sensitivity Cox using latent factor scores (N = %d, events = %d).\n\n",
             nrow(surv_cfa_df), sum(surv_cfa_df$hf_composite == 1)))
-```
-
-**Table S_CFA_Cox.** Sensitivity Cox using latent factor scores (N = 60,
-events = 19).
-
-``` r
 if (!is_gfm_output) {
   # keep p_num in the data but hide it via col_keys so the bold() formula resolves
   cfa_cox_ft <- flextable(cfa_cox_tab,
@@ -4161,7 +4739,7 @@ if (!is_gfm_output) {
 }
 ```
 
-``` r
+```{r figS_crude_vs_adjusted, results='asis'}
 # Build a long data frame with one row per predictor × model (crude / adjusted)
 crude_adj_rows <- bind_rows(
   if (!is.null(cox_lvot_crude)) {
@@ -4267,22 +4845,7 @@ if (nrow(crude_adj_rows) > 0) {
   )
   cat("\n\n", legend_crude_adj, "\n\n")
 }
-```
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figS_crude_vs_adjusted-1.png)
-
-**Supplemental Figure. Crude versus adjusted hazard ratios for
-non-significant Figure 5E predictors.** Each panel shows the unadjusted
-(circle) and covariate-adjusted (diamond) hazard ratio per 1 SD for
-maximum LVOT gradient, peak V̇O₂ (FRIEND 2.0 % predicted), and V̇E/V̇CO₂
-slope. Adjusted models include age, sex, BMI, β-blocker use, and non-DHP
-CCB use as covariates. Horizontal lines represent 95% confidence
-intervals; the dashed vertical line marks HR = 1. Minimal change in
-point estimates between crude and adjusted models indicates that
-covariate adjustment does not account for the non-significant
-associations.
-
-``` r
 # Export CSV for verification
 crude_adj_export <- crude_adj_rows %>%
   transmute(
@@ -4296,7 +4859,7 @@ write.csv(crude_adj_export, "../2_Output/TableS_CrudeVsAdjusted_NonsigPredictors
 
 ## Medication-Adjusted and Intervention-Censored Sensitivities
 
-``` r
+```{r figure5_sensitivity, results='asis'}
 # ── Fig 5 sensitivity: re-fit Cox censoring at major interventions ────────────
 # myectomy/ablation/transplant alter physiology; censor follow-up there to check
 # the HRs aren't artifacts of post-intervention events
@@ -4456,11 +5019,7 @@ if (nrow(figure5_sensitivity_hr_table) > 0) {
 
   show_and_save_jacc(p_fig5_sensitivity, "../2_Output/Figure5_HeartFailure_Outcomes_Sensitivity.pdf", w = 7.0, h = 6.0)
 }
-```
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/figure5_sensitivity-1.png)
-
-``` r
 figure5_primary_compare <- if (exists("forest_rows") && nrow(forest_rows) > 0) {
   forest_rows %>%
     transmute(Scenario = "Primary composite (expanded covariates)", Exposure = as.character(exposure), `HR (95% CI)` = sprintf("%.2f (%.2f-%.2f)", estimate, conf.low, conf.high), `P value` = ifelse(p.value < 0.001, "<0.001", sprintf("%.3f", p.value)))
@@ -4478,7 +5037,7 @@ if (nrow(figure5_sensitivity_comparison) > 0) {
 }
 ```
 
-``` r
+```{r figure5_validation, results='asis'}
 # ── Cohort sizes ──────────────────────────────────────────────────────────────
 hf_follow_n_live  <- nrow(surv_df)
 hf_event_n_live   <- sum(surv_df$hf_composite == 1, na.rm = TRUE)
@@ -4520,52 +5079,16 @@ r_vo2     <- extract_cox(cox_vo2,    "vo2_friend2_z")
 r_vevco2  <- extract_cox(cox_vevco2, "vevco2_slope_z")
 
 cat("::: {.manuscript-check}\n")
-```
-
-<div class="manuscript-check">
-
-``` r
 cat("**Figure 5 Validation — Cohort Sizes**\n\n")
-```
-
-**Figure 5 Validation — Cohort Sizes**
-
-``` r
 cat(sprintf("- Full outcomes cohort (KM): **%d patients**, **%d events** (%.1f%%)\n",
             hf_follow_n_live, hf_event_n_live, 100 * hf_event_n_live / hf_follow_n_live))
-```
-
-- Full outcomes cohort (KM): **447 patients**, **136 events** (30.4%)
-
-``` r
 cat(sprintf("- Cox model cohort (complete covariates): **%d patients**, **%d events** (%.1f%%)\n",
             hf_model_n, hf_model_events, 100 * hf_model_events / hf_model_n))
-```
-
-- Cox model cohort (complete covariates): **244 patients**, **82
-  events** (33.6%)
-
-``` r
 cat(sprintf("- Composite LVDD Cox cohort (fp_class available): **%d patients**, **%d events** (%.1f%%)\n",
             hf_fp_n, hf_fp_events, 100 * hf_fp_events / hf_fp_n))
-```
-
-- Composite LVDD Cox cohort (fp_class available): **244 patients**, **82
-  events** (33.6%)
-
-``` r
 cat("- Manuscript reference: **639 patients, 166 events** (full cohort)\n\n")
-```
 
-- Manuscript reference: **639 patients, 166 events** (full cohort)
-
-``` r
 cat("**Figure 5 Validation — Cox Model HRs (per 1 SD; \u2713 = P < 0.05)**\n\n")
-```
-
-**Figure 5 Validation — Cox Model HRs (per 1 SD; ✓ = P \< 0.05)**
-
-``` r
 cat(fmt_row("Composite LVDD (elevated vs. not elevated)", r_fp))
 cat(fmt_row("LAVi Z-score (GAMLSS age/sex-adjusted)", r_lavi))
 cat(fmt_row("E/e\u2019 Z-score", r_ee))
@@ -4577,36 +5100,19 @@ cat(fmt_row("V\u0307E/V\u0307CO\u2082 slope Z-score", r_vevco2))
 cat(":::\n")
 ```
 
-</div>
+# Tables {#sec-tables}
 
-# Tables
+The following tables correspond directly to the three manuscript tables. All are generated programmatically and exported as `.docx` files to `../2_Output/` for direct integration into the manuscript. Values reported in each table can be cross-checked against the inline validation outputs printed elsewhere in this document.
 
-The following tables correspond directly to the three manuscript tables.
-All are generated programmatically and exported as `.docx` files to
-`../2_Output/` for direct integration into the manuscript. Values
-reported in each table can be cross-checked against the inline
-validation outputs printed elsewhere in this document.
+**Table 1** summarizes baseline demographic, echocardiographic, and cardiopulmonary characteristics for HCM patients, G+/P- carriers, and matched non-HCM controls. Continuous variables are presented as median (IQR); categorical variables as N (%). Group comparisons use Kruskal-Wallis for continuous variables and Fisher's exact test for categorical variables.
 
-**Table 1** summarizes baseline demographic, echocardiographic, and
-cardiopulmonary characteristics for HCM patients, G+/P- carriers, and
-matched non-HCM controls. Continuous variables are presented as median
-(IQR); categorical variables as N (%). Group comparisons use
-Kruskal-Wallis for continuous variables and Fisher’s exact test for
-categorical variables.
+**Table 2** reports the likelihood ratio test P values and model fit statistics from the six primary cross-sectional RCS models (Figure 3: three diastolic indices × two CPX outcomes), along with the nonlinearity Q values and spline-versus-linear ΔAIC.
 
-**Table 2** reports the likelihood ratio test P values and model fit
-statistics from the six primary cross-sectional RCS models (Figure 3:
-three diastolic indices × two CPX outcomes), along with the nonlinearity
-Q values and spline-versus-linear ΔAIC.
-
-**Table 3** summarizes the parametric fixed-effect terms from the
-longitudinal GAMM models (Figure 4), including the main effect of each
-diastolic parameter and the diastolic × time interaction, for both Peak
-V̇O$_2$ and V̇E/V̇CO$_2$ slope outcomes.
+**Table 3** summarizes the parametric fixed-effect terms from the longitudinal GAMM models (Figure 4), including the main effect of each diastolic parameter and the diastolic × time interaction, for both Peak V̇O$_2$ and V̇E/V̇CO$_2$ slope outcomes.
 
 ## Table 1: Baseline Characteristics
 
-``` r
+```{r table1_inline}
 # ── Table 1: baseline characteristics (gtsummary) ─────────────────────────────
 make_yn_factor <- function(x) {
   # Treat NA and any non-1 value as "No" — for clinical binary variables,
@@ -4871,9 +5377,305 @@ if (!is_gfm_output) {
 }
 ```
 
+```{r figure1_combined_single_column, include=FALSE}
+# Export the Figure 1 validation plots at journal/preprint widths.
+# The formatted Table 1 remains a standalone table.
+figure1_table_content_width <- 3.21
+figure1_table_content_height <- 5.00
+figure1_table_label_pad <- 0.16
+figure1_single_col_width <- figure1_table_content_width
+figure1_scale_factor <- figure1_single_col_width / figure1_export_width
+figure1_table_first_col_width <- 1.48
+figure1_table_width_frac <- figure1_table_content_width / figure1_single_col_width
+figure1_table_height <- figure1_table_content_height + figure1_table_label_pad
+figure1_table_height_frac <- figure1_table_content_height / figure1_table_height
+figure1_table_center_y <- figure1_table_height_frac / 2
+figure1_panel_tag_size <- 6.5
+figure1_plot_height <- figure1_export_height * figure1_scale_factor
+figure1_gap_height <- 0.08 * figure1_scale_factor
+figure1_combined_height <- figure1_table_height + figure1_gap_height + figure1_plot_height
+
+figure1_table_ft <- table1_ft %>%
+  set_caption(caption = NULL) %>%
+  fontsize(size = 6.3, part = "all") %>%
+  line_spacing(space = 0.78, part = "all") %>%
+  line_spacing(space = 1.0, part = "header") %>%
+  padding(padding.top = 0, padding.bottom = 0, padding.left = 1.2, padding.right = 1.2, part = "body") %>%
+  padding(padding.top = 0, padding.bottom = 0, padding.left = 1.2, padding.right = 1.2, part = "header") %>%
+  padding(i = section_indices, j = 1, padding.left = 1.2, part = "body") %>%
+  padding(i = setdiff(seq_len(nrow(t1_tib)), section_indices), j = 1, padding.left = 8, part = "body") %>%
+  width(j = 1, width = figure1_table_first_col_width) %>%
+  width(j = 2:ncol(t1_tib), width = (figure1_table_content_width - figure1_table_first_col_width) / (ncol(t1_tib) - 1)) %>%
+  set_table_properties(layout = "fixed")
+
+figure1_table_grob <- flextable::gen_grob(
+  figure1_table_ft,
+  fit = "auto",
+  scaling = "min",
+  wrapping = TRUE
+)
+
+figure1_table_panel <- grid::grobTree(
+  grid::textGrob(
+    "(A)",
+    x = grid::unit(0.004, "npc"),
+    y = grid::unit(0.996, "npc"),
+    just = c("left", "top"),
+    gp = grid::gpar(fontface = "bold", fontsize = figure1_panel_tag_size, fontfamily = "Arial", col = "#111111")
+  ),
+  grid::grobTree(
+    figure1_table_grob,
+    vp = grid::viewport(
+      x = 0.5, y = figure1_table_center_y,
+      width = grid::unit(figure1_table_width_frac, "npc"),
+      height = grid::unit(figure1_table_height_frac, "npc"),
+      just = c("center", "center")
+    )
+  )
+)
+
+figure1_hist_panel_combined <- (
+  make_hcm_validation_hist(validation_df, "lv_max_wall_thickness", "Wall Thickness", "cm", bins = 30, show_y = TRUE,
+                           x_limits = c(0, 3), x_breaks = c(0, 1, 2, 3), size_scale = figure1_scale_factor) |
+  make_hcm_validation_hist(validation_df, "lv_septal_thickness", "Septal Wall", "cm", bins = 30,
+                           x_limits = c(0, 3), x_breaks = c(0, 1, 2, 3), size_scale = figure1_scale_factor) |
+  make_hcm_validation_hist(validation_df, "avg_eprime_age_cal", "Average e' (Age-calibrated)", "Observed - age-expected, cm/s", bins = 28, show_legend = TRUE, size_scale = figure1_scale_factor)
+) / (
+  make_hcm_validation_hist(validation_df, "lvot_max_gradient", "LVOT Gradient", "mm Hg", bins = 30,
+                           x_limits = c(0, 150), x_breaks = c(0, 50, 100, 150), show_y = TRUE, size_scale = figure1_scale_factor) |
+  make_hcm_validation_hist(validation_df, "la_vol_index", "LAVi", bquote("mL/" * m^2), bins = 30, show_y = TRUE,
+                           x_limits = c(0, 75), x_breaks = c(0, 25, 50, 75), size_scale = figure1_scale_factor) |
+  make_hcm_validation_hist(validation_df, "ef_modsp4", "LVEF", "%", bins = 28,
+                           x_limits = c(40, 85), x_breaks = c(40, 50, 60, 70, 80), size_scale = figure1_scale_factor)
+) +
+  plot_layout(heights = c(1, 1), widths = c(1, 1, 1)) +
+  plot_annotation(tag_levels = "A", tag_prefix = "(", tag_suffix = ")") &
+  theme(
+    plot.tag = element_text(face = "bold", size = figure1_panel_tag_size),
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+figure1_hist_grob_single <- patchwork::patchworkGrob(figure1_hist_panel_combined)
+
+figure1_combined_legend_text <- paste0(
+  "**Figure 1. Matched Cohort Validation.** ",
+  "Age-, sex-, and BMI-matched controls (CON; gray), non-obstructive HCM (rose), and obstructive HCM (LVOT gradient ≥30 mm Hg; steel blue) are compared across maximum wall thickness, septal thickness, age-calibrated average e', left ventricular outflow tract gradient, left atrial volume index, and left ventricular ejection fraction. ",
+  "Each panel shows kernel density curves with a horizontally oriented boxplot and individual patient values."
+)
+
+figure1_legend_block <- make_embedded_legend_grob(
+  text = figure1_combined_legend_text,
+  width_in = figure1_single_col_width,
+  fontsize = 5.2,
+  lineheight = 1.15,
+  margin_in = 0.02
+)
+figure1_legend_gap_height <- 0.05
+figure1_legend_height <- figure1_legend_gap_height + figure1_legend_block$height_in
+figure1_combined_height <- figure1_plot_height + figure1_legend_height
+figure1_figure_only_height <- figure1_plot_height
+
+figure1_figure_only_grob <- figure1_hist_grob_single
+
+figure1_combined_grob <- grid::grobTree(
+  vp = grid::viewport(
+    layout = grid::grid.layout(
+      nrow = 3,
+      ncol = 1,
+      heights = grid::unit.c(
+        grid::unit(figure1_plot_height, "in"),
+        grid::unit(figure1_legend_gap_height, "in"),
+        grid::unit(figure1_legend_block$height_in, "in")
+      )
+    )
+  ),
+  children = grid::gList(
+    grid::grobTree(
+      figure1_hist_grob_single,
+      vp = grid::viewport(layout.pos.row = 1, layout.pos.col = 1)
+    ),
+    grid::grobTree(
+      figure1_legend_block$grob,
+      vp = grid::viewport(layout.pos.row = 3, layout.pos.col = 1)
+    )
+  )
+)
+
+write_grob_pdf <- function(grob, path, width, height) {
+  grDevices::cairo_pdf(path, width = width, height = height)
+  grid::grid.newpage()
+  grid::grid.draw(grob)
+  grDevices::dev.off()
+  invisible(path)
+}
+
+save_figure1_pdf_png <- function(path, width, table_height, gap_height, plot_height, legend_height = 0, dpi = 600) {
+  path <- normalizePath(path, mustWork = FALSE)
+  height <- plot_height + legend_height
+  output_grob <- if (legend_height > 0) figure1_combined_grob else figure1_figure_only_grob
+  part_dir <- file.path(dirname(path), "Figure1_parts")
+  dir.create(part_dir, recursive = TRUE, showWarnings = FALSE)
+  part_dir <- normalizePath(part_dir, mustWork = TRUE)
+
+  plot_pdf <- file.path(part_dir, "Figure1A_F_DensityBoxPointPanels.pdf")
+
+  write_grob_pdf(figure1_hist_grob_single, plot_pdf, width = width, height = plot_height)
+  write_grob_pdf(output_grob, path, width = width, height = height)
+
+  png_path <- sub("\\.pdf$", ".png", path, ignore.case = TRUE)
+  grDevices::png(png_path, width = width, height = height, units = "in", res = dpi, type = "cairo", bg = "white")
+  grid::grid.newpage()
+  grid::grid.draw(output_grob)
+  grDevices::dev.off()
+  invisible(path)
+}
+
+figure1_combined_paths_with_caption <- c(
+  "../2_Output/Figure1_MatchedControls_and_BaselineCharacteristics.pdf",
+  "../2_Output/Manuscript_Main/Figure1_MatchedControls_and_BaselineCharacteristics.pdf",
+  "../Manuscript/Figures/Figure1_MatchedControls_and_BaselineCharacteristics.pdf"
+)
+
+figure1_combined_paths_no_caption <- c(
+  "../2_Output/Figure1_MatchedControls_and_BaselineCharacteristics_Preprint.pdf",
+  "../Manuscript/Figures/Figure1_MatchedControls_and_BaselineCharacteristics_Preprint.pdf"
+)
+
+for (figure1_path in figure1_combined_paths_with_caption) {
+  dir.create(dirname(figure1_path), recursive = TRUE, showWarnings = FALSE)
+  save_figure1_pdf_png(
+    figure1_path,
+    width = figure1_single_col_width,
+    table_height = figure1_table_height,
+    gap_height = figure1_gap_height,
+    plot_height = figure1_plot_height,
+    legend_height = figure1_legend_height
+  )
+}
+
+# Preprint version: plot-only validation panels.
+figure1_preprint_width        <- 7.2
+figure1_preprint_tag_size     <- 9.0
+figure1_preprint_table_font   <- 7.5
+figure1_preprint_table_space  <- 0.85   # body line spacing at wider width
+figure1_preprint_first_col_w  <- 2.8    # characteristic column (in)
+figure1_preprint_data_col_w   <- (figure1_preprint_width - figure1_preprint_first_col_w) /
+                                  (ncol(t1_tib) - 1)
+figure1_preprint_table_content_height <- 6.4   # approximate; adjust if table clips
+figure1_preprint_table_height <- figure1_preprint_table_content_height + figure1_table_label_pad
+figure1_preprint_plot_height  <- figure1_export_height   # density panels at scale 1.0
+figure1_preprint_gap_height   <- 0.10
+figure1_preprint_total_height <- figure1_preprint_plot_height
+
+figure1_table_ft_preprint <- figure1_table_ft %>%
+  fontsize(size = figure1_preprint_table_font, part = "all") %>%
+  line_spacing(space = figure1_preprint_table_space, part = "body") %>%
+  line_spacing(space = 1.0, part = "header") %>%
+  padding(padding.top = 0.5, padding.bottom = 0.5,
+          padding.left = 2, padding.right = 2, part = "body") %>%
+  padding(padding.top = 1, padding.bottom = 1,
+          padding.left = 2, padding.right = 2, part = "header") %>%
+  padding(i = section_indices, j = 1, padding.left = 2, part = "body") %>%
+  padding(i = setdiff(seq_len(nrow(t1_tib)), section_indices),
+          j = 1, padding.left = 10, part = "body") %>%
+  width(j = 1, width = figure1_preprint_first_col_w) %>%
+  width(j = 2:ncol(t1_tib), width = figure1_preprint_data_col_w) %>%
+  set_table_properties(layout = "fixed")
+
+figure1_table_grob_preprint <- flextable::gen_grob(
+  figure1_table_ft_preprint,
+  fit = "auto", scaling = "min", wrapping = TRUE
+)
+
+figure1_preprint_table_content_frac <- figure1_preprint_table_content_height /
+                                        figure1_preprint_table_height
+
+figure1_table_panel_preprint <- grid::grobTree(
+  grid::textGrob(
+    "(A)",
+    x = grid::unit(0.004, "npc"), y = grid::unit(0.996, "npc"),
+    just = c("left", "top"),
+    gp = grid::gpar(fontface = "bold", fontsize = figure1_preprint_tag_size,
+                    fontfamily = "Arial", col = "#111111")
+  ),
+  grid::grobTree(
+    figure1_table_grob_preprint,
+    vp = grid::viewport(
+      x = 0.5, y = figure1_preprint_table_content_frac / 2,
+      width  = grid::unit(1, "npc"),
+      height = grid::unit(figure1_preprint_table_content_frac, "npc"),
+      just = c("center", "center")
+    )
+  )
+)
+
+figure1_hist_panel_preprint <- (
+  make_hcm_validation_hist(validation_df, "lv_max_wall_thickness",
+    "Wall Thickness", "cm", bins = 30, show_y = TRUE,
+    x_limits = c(0, 3), x_breaks = c(0, 1, 2, 3), size_scale = 1.0) |
+  make_hcm_validation_hist(validation_df, "lv_septal_thickness",
+    "Septal Wall", "cm", bins = 30,
+    x_limits = c(0, 3), x_breaks = c(0, 1, 2, 3), size_scale = 1.0) |
+  make_hcm_validation_hist(validation_df, "avg_eprime_age_cal",
+    "Average e’ (Age-calibrated)", "Observed - age-expected, cm/s",
+    bins = 28, show_legend = TRUE, size_scale = 1.0)
+) / (
+  make_hcm_validation_hist(validation_df, "lvot_max_gradient",
+    "LVOT Gradient", "mm Hg", bins = 30, show_y = TRUE,
+    x_limits = c(0, 150), x_breaks = c(0, 50, 100, 150), size_scale = 1.0) |
+  make_hcm_validation_hist(validation_df, "la_vol_index",
+    "LAVi", bquote("mL/" * m^2), bins = 30, show_y = TRUE,
+    x_limits = c(0, 75), x_breaks = c(0, 25, 50, 75), size_scale = 1.0) |
+  make_hcm_validation_hist(validation_df, "ef_modsp4",
+    "LVEF", "%", bins = 28,
+    x_limits = c(40, 85), x_breaks = c(40, 50, 60, 70, 80), size_scale = 1.0)
+) +
+  plot_layout(heights = c(1, 1), widths = c(1, 1, 1)) +
+  plot_annotation(tag_levels = "A", tag_prefix = "(", tag_suffix = ")") &
+  theme(
+    plot.tag  = element_text(face = "bold", size = figure1_preprint_tag_size),
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+figure1_hist_grob_preprint <- patchwork::patchworkGrob(figure1_hist_panel_preprint)
+
+figure1_grob_preprint <- figure1_hist_grob_preprint
+
+for (figure1_path in figure1_combined_paths_no_caption) {
+  dir.create(dirname(figure1_path), recursive = TRUE, showWarnings = FALSE)
+  write_grob_pdf(
+    figure1_grob_preprint,
+    figure1_path,
+    width = figure1_preprint_width,
+    height = figure1_preprint_plot_height
+  )
+  png_path <- sub("\\.pdf$", ".png", figure1_path, ignore.case = TRUE)
+  grDevices::png(
+    png_path,
+    width = figure1_preprint_width,
+    height = figure1_preprint_plot_height,
+    units = "in",
+    res = 600,
+    type = "cairo",
+    bg = "white"
+  )
+  grid::grid.newpage()
+  grid::grid.draw(figure1_grob_preprint)
+  grDevices::dev.off()
+}
+
+legend_fig1_pdf <- paste0(
+  "**Figure 1. Matched Cohort Validation.** ",
+  "Age-, sex-, and BMI-matched controls (CON; gray), non-obstructive HCM (rose), and obstructive HCM ",
+  "(LVOT gradient \u226530 mm Hg; steel blue) are compared across maximum wall thickness, septal thickness, age-calibrated average e\u2019, ",
+  "left ventricular outflow tract gradient, left atrial volume index, and left ventricular ejection fraction. ",
+  "Each panel shows kernel density curves with a horizontally oriented boxplot and individual patient values."
+)
+```
+
 ## Table 2: RCS Model Summaries
 
-``` r
+```{r table2_inline}
 # Table 2 = Fig 3 RCS flextable (skip in gfm; rendered as image elsewhere)
 if (!is_gfm_output) {
   figure3_ft
@@ -4882,105 +5684,44 @@ if (!is_gfm_output) {
 
 ## Table 3: GAMM Model Summaries
 
-``` r
+```{r table3_inline}
 # Table 3 = Fig 4 GAMM flextable (skip in gfm)
 if (!is_gfm_output) {
   figure4_ft
 }
 ```
 
-# Methodologic Notes and Acknowledged Limitations
+# Methodologic Notes and Acknowledged Limitations {#sec-limitations}
 
-This section documents specific methodologic limitations of the present
-analysis that should be acknowledged in the manuscript Discussion.
+This section documents specific methodologic limitations of the present analysis that should be acknowledged in the manuscript Discussion.
 
-**Apical HCM pooled with septal HCM.** Apical HCM (Yamaguchi-type)
-constitutes ~5–10% of the cohort and exhibits diastolic physiology
-distinct from septal hypertrophy (more restrictive filling, less
-obstruction, distinct V̇O₂ patterns). This analysis pools apical and
-septal HCM in all primary models. A stratified or apical-excluded
-sensitivity is **not** included; the limitation is acknowledged here for
-completeness.
+**Apical HCM pooled with septal HCM.** Apical HCM (Yamaguchi-type) constitutes \~5–10% of the cohort and exhibits diastolic physiology distinct from septal hypertrophy (more restrictive filling, less obstruction, distinct V̇O₂ patterns). This analysis pools apical and septal HCM in all primary models. A stratified or apical-excluded sensitivity is **not** included; the limitation is acknowledged here for completeness.
 
-**Resting LVOT gradient only.** Obstructive HCM is defined by resting
-LVOT gradient ≥30 mm Hg. Many patients classified as non-obstructive may
-have provocable obstruction during Valsalva, post-PVC, or exercise.
-Provocative gradients were not uniformly recorded in this CPX registry.
-The 2024 AHA/ACC HCM guideline uses peak provocable gradient as the
-canonical definition; readers should interpret cross-comparison with
-provocation-based studies cautiously.
+**Resting LVOT gradient only.** Obstructive HCM is defined by resting LVOT gradient ≥30 mm Hg. Many patients classified as non-obstructive may have provocable obstruction during Valsalva, post-PVC, or exercise. Provocative gradients were not uniformly recorded in this CPX registry. The 2024 AHA/ACC HCM guideline uses peak provocable gradient as the canonical definition; readers should interpret cross-comparison with provocation-based studies cautiously.
 
-**Pathogenic-variant subgroup not analysed.** Genetic testing data are
-available for a subset of patients and are used for cohort inclusion
-(gene+ with wall thickness ≥1.3 cm). Pathogenic-variant carriers exhibit
-younger onset and more progressive natural history. The current analysis
-does **not** stratify primary endpoints by sarcomere-variant status;
-this is documented as a future direction.
+**Pathogenic-variant subgroup not analysed.** Genetic testing data are available for a subset of patients and are used for cohort inclusion (gene+ with wall thickness ≥1.3 cm). Pathogenic-variant carriers exhibit younger onset and more progressive natural history. The current analysis does **not** stratify primary endpoints by sarcomere-variant status; this is documented as a future direction.
 
-**No competing-risks (Fine-Gray) model for the composite endpoint.**
-Heart transplantation and major septal interventions (myectomy, alcohol
-septal ablation) are treated via the intervention-censored sensitivity
-analysis rather than as competing events. Fine-Gray
-subdistribution-hazard modelling is not used in this revision. The
-intervention-censored sensitivity provides the principal mechanism for
-distinguishing prognostic from treatment-mediated effects, but a formal
-competing-risks model would refine the interpretation; this is noted as
-a methodologic limitation.
+**No competing-risks (Fine-Gray) model for the composite endpoint.** Heart transplantation and major septal interventions (myectomy, alcohol septal ablation) are treated via the intervention-censored sensitivity analysis rather than as competing events. Fine-Gray subdistribution-hazard modelling is not used in this revision. The intervention-censored sensitivity provides the principal mechanism for distinguishing prognostic from treatment-mediated effects, but a formal competing-risks model would refine the interpretation; this is noted as a methodologic limitation.
 
-**Medication-data missingness affects sensitivity-table cohort sizes.**
-The GAMM sensitivity table reports unadjusted-vs-medication-adjusted
-comparisons across cohorts of differing size (full N≈530 obs unadjusted
-vs N≈205 obs medication-adjusted) because medication-data availability
-is required for the latter models. Interpretation of the gradient from
-“unadjusted” to “medication-adjusted” therefore reflects a mixture of
-confounding adjustment and cohort restriction. Pre-specified imputation
-was not used.
+**Medication-data missingness affects sensitivity-table cohort sizes.** The GAMM sensitivity table reports unadjusted-vs-medication-adjusted comparisons across cohorts of differing size (full N≈530 obs unadjusted vs N≈205 obs medication-adjusted) because medication-data availability is required for the latter models. Interpretation of the gradient from "unadjusted" to "medication-adjusted" therefore reflects a mixture of confounding adjustment and cohort restriction. Pre-specified imputation was not used.
 
-**Co-primary endpoints with Bonferroni α = 0.025.** LAVi cohort-internal
-GAMLSS Z-score and the composite “elevated filling pressure” classifier
-are jointly co-primary; both retain significance at α = 0.025 after
-Bonferroni adjustment. Other parameter-specific Cox models (E/e′,
-TRVmax, septal thickness, LVOT, V̇O₂, V̇E/V̇CO₂ Z-scores) are exploratory
-and uncorrected.
+**Co-primary endpoints with Bonferroni α = 0.025.** LAVi cohort-internal GAMLSS Z-score and the composite "elevated filling pressure" classifier are jointly co-primary; both retain significance at α = 0.025 after Bonferroni adjustment. Other parameter-specific Cox models (E/e′, TRVmax, septal thickness, LVOT, V̇O₂, V̇E/V̇CO₂ Z-scores) are exploratory and uncorrected.
 
-**LAVi Z-score is cohort-internal.** GAMLSS-derived LAVi Z-scores
-reference the HCM baseline cohort itself, not an external healthy
-population. Z = 0 represents the average HCM patient of the same age and
-sex; positive Z indicates above-average LAVi for that age/sex subgroup
-*within HCM*. This is acceptable as a cohort-internal prognostic
-predictor but cannot be directly compared with literature LAVi Z-scores
-derived from healthy reference equations.
+**LAVi Z-score is cohort-internal.** GAMLSS-derived LAVi Z-scores reference the HCM baseline cohort itself, not an external healthy population. Z = 0 represents the average HCM patient of the same age and sex; positive Z indicates above-average LAVi for that age/sex subgroup *within HCM*. This is acceptable as a cohort-internal prognostic predictor but cannot be directly compared with literature LAVi Z-scores derived from healthy reference equations.
 
-# Supplemental Analyses
+# Supplemental Analyses {#sec-supplemental}
 
-This section generates supplemental figures and tables that extend or
-stress-test the primary manuscript results. Each analysis corresponds to
-a figure or table referenced in the manuscript supplement.
+This section generates supplemental figures and tables that extend or stress-test the primary manuscript results. Each analysis corresponds to a figure or table referenced in the manuscript supplement.
 
-**Figure S1** extends the Figure 3 RCS analysis to all available
-diastolic parameters beyond the three ASE-recommended primary indices -
-including septal e′, MV E/A ratio, MV deceleration time, and pulmonary
-vein S/D ratio. This allows readers to assess whether the primary-index
-findings generalize across the broader diastolic parameter set.
+**Figure S1** extends the Figure 3 RCS analysis to all available diastolic parameters beyond the three ASE-recommended primary indices - including septal e′, MV E/A ratio, MV deceleration time, and pulmonary vein S/D ratio. This allows readers to assess whether the primary-index findings generalize across the broader diastolic parameter set.
 
-**Figures S2-S3** report supplemental OMARX analyses applying
-multivariate adaptive regression splines (MARS) to explore data-driven
-threshold structure in a hypothesis-free manner. As summarized at the
-end of the Figure 3 section, these models yielded modest explanatory
-performance and did not identify a threshold structure that outperformed
-the ASE-guided framework, though protected-clinical-knot models were
-broadly compatible with existing cut points.
+**Figures S2-S3** report supplemental OMARX analyses applying multivariate adaptive regression splines (MARS) to explore data-driven threshold structure in a hypothesis-free manner. As summarized at the end of the Figure 3 section, these models yielded modest explanatory performance and did not identify a threshold structure that outperformed the ASE-guided framework, though protected-clinical-knot models were broadly compatible with existing cut points.
 
-**Figure S4** presents age-residualized diastolic indices as a
-sensitivity analysis confirming that the cross-sectional associations in
-Figure 3 persist after removing the age-related component of each
-diastolic parameter (linear regression residualization within sex),
-ruling out confounding by age-related diastolic change as an alternative
-explanation.
+**Figure S4** presents age-residualized diastolic indices as a sensitivity analysis confirming that the cross-sectional associations in Figure 3 persist after removing the age-related component of each diastolic parameter (linear regression residualization within sex), ruling out confounding by age-related diastolic change as an alternative explanation.
 
 ## Figure S1: All-Parameter RCS
 
-``` r
+```{r supplemental_s1, fig.width=11, fig.height=10.5, results='asis'}
 # ── Fig S1: RCS curves for all diastolic params x outcomes (full grid) ─────────
 supp_outcome_specs <- tribble(
   ~outcome, ~outcome_label, ~curve_color, ~fill_color,
@@ -5116,11 +5857,9 @@ if (nrow(supp_rcs_all_curves) > 0) {
 }
 ```
 
-![](README_HCM_Manuscript_V2_files/figure-commonmark/supplemental_s1-1.png)
-
 ## Figures S2-S3: OMARX
 
-``` r
+```{r supplemental_omarx_assets, results='asis'}
 # ── stage OMARX (python ML) figures/tables into the supplement, if present ─────
 # OMARX is the optional ML pipeline (params$run_omarx); copy its outputs if built
 copy_from_candidates <- function(target_path, candidates) {
@@ -5164,12 +5903,106 @@ for (asset in omarx_assets) {
 cat("OMARX supplemental outputs are surfaced from the most recently verified run when `params$run_omarx` is false.\n")
 ```
 
-OMARX supplemental outputs are surfaced from the most recently verified
-run when `params$run_omarx` is false.
+## Figure S4: ΔE' Longitudinal Coupling
 
-## Figure S4: ΔE’ Longitudinal Coupling
+```{r supplemental_s4_prepare, include=FALSE}
+# ── Fig S4 prep: within-patient deltas (consecutive tests) ────────────────────
+# pair consecutive visits per patient -> Δoutcome vs Δe' to show change-on-change
+build_delta_pair_df <- function(df, outcome_var, eprime_var = "e_prime_ave") {
+  df %>%
+    mutate(
+      across(any_of(c(outcome_var, eprime_var, "age", "BMI", "time_yrs")), ~ as_num(.)),
+      Sex = factor(Sex, levels = c("Male", "Female"))
+    ) %>%
+    filter(!is.na(ID), !is.na(time_yrs), is.finite(time_yrs)) %>%
+    group_by(ID) %>%
+    arrange(time_yrs, .by_group = TRUE) %>%
+    group_modify(function(.x, .y) {
+      base_idx <- which(!is.na(.x[[eprime_var]]) & !is.na(.x[[outcome_var]]) & !is.na(.x$age) & !is.na(.x$Sex) & !is.na(.x$BMI))[1]
+      if (length(base_idx) == 0 || is.na(base_idx)) return(tibble())
+      base_row <- .x[base_idx, , drop = FALSE]
+      .x %>%
+        filter(row_number() >= base_idx, !is.na(.data[[eprime_var]]), !is.na(.data[[outcome_var]]), !is.na(age), !is.na(Sex), !is.na(BMI)) %>%
+        mutate(
+          pair_baseline_time = base_row$time_yrs[[1]],
+          delta_time_yrs = time_yrs - pair_baseline_time,
+          delta_eprime = .data[[eprime_var]] - base_row[[eprime_var]][[1]],
+          delta_outcome = .data[[outcome_var]] - base_row[[outcome_var]][[1]],
+          baseline_age = base_row$age[[1]],
+          baseline_bmi = base_row$BMI[[1]],
+          baseline_sex = factor(base_row$Sex[[1]], levels = levels(.x$Sex)),
+          outcome = outcome_var
+        )
+    }) %>%
+    ungroup() %>%
+    filter(delta_time_yrs > 0)
+}
 
-``` r
+fit_delta_lme <- function(df) {
+  if (nrow(df) < 30 || n_distinct(df$ID) < 20) return(NULL)
+  tryCatch(
+    nlme::lme(
+      delta_outcome ~ delta_eprime + delta_time_yrs + baseline_age + baseline_sex + baseline_bmi,
+      random = ~1 | ID,
+      data = df,
+      method = "REML",
+      na.action = na.omit,
+      control = nlme::lmeControl(opt = "optim")
+    ),
+    error = function(e) NULL
+  )
+}
+
+make_delta_pred <- function(df, model, x_seq = NULL) {
+  if (is.null(model) || nrow(df) == 0) return(tibble())
+  if (is.null(x_seq)) {
+    x_seq <- seq(quantile(df$delta_eprime, 0.05, na.rm = TRUE), quantile(df$delta_eprime, 0.95, na.rm = TRUE), length.out = 120)
+  }
+  newd <- tibble(
+    delta_eprime = x_seq,
+    delta_time_yrs = median(df$delta_time_yrs, na.rm = TRUE),
+    baseline_age = median(df$baseline_age, na.rm = TRUE),
+    baseline_bmi = median(df$baseline_bmi, na.rm = TRUE),
+    baseline_sex = factor(names(which.max(table(df$baseline_sex))), levels = levels(df$baseline_sex))
+  )
+  X <- model.matrix(delete.response(stats::terms(model)), data = newd)
+  beta <- nlme::fixef(model)
+  vc <- as.matrix(stats::vcov(model))
+  fit <- as.vector(X %*% beta)
+  se <- sqrt(diag(X %*% vc %*% t(X)))
+  newd %>% transmute(delta_eprime, fit, lo = fit - 1.96 * se, hi = fit + 1.96 * se)
+}
+
+plot_delta_panel <- function(df, pred_df, model, title, y_label, line_color, show_legend = FALSE) {
+  if (nrow(df) == 0) return(ggplot() + annotate("text", x = 0.5, y = 0.5, label = "Delta data unavailable") + theme_void())
+  beta_txt <- if (!is.null(model) && "delta_eprime" %in% rownames(summary(model)$tTable)) {
+    est <- summary(model)$tTable["delta_eprime", "Value"]
+    p <- summary(model)$tTable["delta_eprime", "p-value"]
+    paste0("Mixed-model beta = ", sprintf("%.2f", est), ", p = ", ifelse(p < 0.001, "<0.001", sprintf("%.3f", p)))
+  } else {
+    "Mixed model unavailable"
+  }
+
+  ggplot(df, aes(x = delta_eprime, y = delta_outcome, color = delta_time_yrs)) +
+    geom_hline(yintercept = 0, color = alpha("black", 0.25), linewidth = 0.4) +
+    geom_vline(xintercept = 0, color = alpha("black", 0.25), linewidth = 0.4) +
+    geom_point(alpha = 0.72, size = 1.7) +
+    {if (nrow(pred_df) > 0) geom_ribbon(data = pred_df, aes(x = delta_eprime, ymin = lo, ymax = hi), inherit.aes = FALSE, fill = alpha(line_color, 0.14), color = NA)} +
+    {if (nrow(pred_df) > 0) geom_line(data = pred_df, aes(x = delta_eprime, y = fit), inherit.aes = FALSE, color = line_color, linewidth = 1)} +
+    scale_color_gradientn(colors = c("#D9DEE2", jacc_cols["orange"], jacc_cols["red"]), name = "Years Since\nPaired Baseline") +
+    labs(title = title, subtitle = beta_txt, x = "ΔAverage e' (cm/s)", y = y_label) +
+    coord_cartesian(xlim = c(-10, 10)) +
+    theme_jacc(base_size = 8.8) +
+    theme(
+      legend.position = if (show_legend) "right" else "none",
+      plot.title = ggtext::element_markdown(face = "bold", size = 10),
+      plot.subtitle = ggtext::element_markdown(size = 7.4),
+      axis.title.y = ggtext::element_markdown(margin = margin(r = 4))
+    )
+}
+```
+
+```{r supplemental_s4_figure, fig.width=7.0, fig.height=3.8, results='asis'}
 # ── Fig S4: Δe' vs Δexercise-capacity scatter/fit ─────────────────────────────
 delta_vo2_df <- build_delta_pair_df(long_df, "VO2_FRIEND2_PP")
 delta_vevco2_df <- build_delta_pair_df(long_df, "VeVco2_slope")
@@ -5186,11 +6019,6 @@ fig_delta_eprime <- (p_delta_vo2 | p_delta_vevco2) +
   theme(plot.tag = element_text(face = "bold", size = 11))
 
 show_and_save_jacc(fig_delta_eprime, "../2_Output/Figure_S4_DeltaEprime_LongitudinalCoupling.pdf", w = 7.0, h = 3.8)
-```
-
-![](README_HCM_Manuscript_V2_files/figure-commonmark/supplemental_s4_figure-1.png)
-
-``` r
 save_jacc_with_embedded_legend(
   fig_delta_eprime,
   "../Manuscript/Supplemental/Figure_S4_DeltaEprime_LongitudinalCoupling.pdf",
@@ -5203,22 +6031,166 @@ save_jacc_with_embedded_legend(
 )
 ```
 
-# Output Gallery
+# Output Gallery {#sec-gallery}
 
-All primary and supplemental figures and tables generated by this
-analysis are consolidated below for review. Main figures (Figures 1-5)
-and main tables (Tables 1-3) are copied to
-`../2_Output/Manuscript_Main/`. Supplemental figures (Figures S1-S4) and
-supplemental tables are copied to
-`../2_Output/Manuscript_Supplemental/`. Each figure is rendered inline
-to allow side-by-side comparison with the manuscript; table entries
-display the path to the corresponding `.docx` file.
+All primary and supplemental figures and tables generated by this analysis are consolidated below for review. Main figures (Figures 1-5) and main tables (Tables 1-3) are copied to `../2_Output/Manuscript_Main/`. Supplemental figures (Figures S1-S4) and supplemental tables are copied to `../2_Output/Manuscript_Supplemental/`. Each figure is rendered inline to allow side-by-side comparison with the manuscript; table entries display the path to the corresponding `.docx` file.
 
-<div class="panel-tabset">
+```{r output_organize, include=FALSE}
+# ── collect rendered figures/tables into numbered Manuscript_* output dirs ─────
+copy_if_exists <- function(filename, target_dir, candidates) {
+  dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+  for (cand in unique(candidates)) {
+    if (file.exists(cand)) {
+      file.copy(cand, file.path(target_dir, filename), overwrite = TRUE)
+      return(TRUE)
+    }
+  }
+  FALSE
+}
 
+main_files <- c(
+  "Figure1_MatchedControls_and_BaselineCharacteristics.pdf",
+  "Figure1_MatchedControls_and_BaselineCharacteristics.png",
+  "Figure2_ASE2025_FillingPressure.pdf",
+  "Figure2_ASE2025_FillingPressure.png",
+  "Figure3_Nonlinear_DiastolicIndices_RCS.pdf",
+  "Figure3_Nonlinear_DiastolicIndices_RCS.png",
+  "Figure4_Longitudinal_GAMM.pdf",
+  "Figure4_Longitudinal_GAMM.png",
+  "Figure5_HeartFailure_Outcomes.pdf",
+  "Figure5_HeartFailure_Outcomes.png",
+  "Table1_Manuscript.docx",
+  "Table2_Figure3_RCS_Summary.csv",
+  "Table2_Figure3_RCS_Summary.docx",
+  "Table3_Figure4_GAMM_Summary.csv",
+  "Table3_Figure4_GAMM_Summary.docx"
+)
+
+for (file in main_files) {
+  copy_if_exists(
+    file,
+    "../2_Output/Manuscript_Main",
+    c(
+      file.path("../2_Output", file),
+      file.path("../Manuscript/Figures", file),
+      file.path("../Manuscript/Supplemental", file)
+    )
+  )
+}
+
+supp_files <- c(
+  "Figure_S1_AllDiastolic_RCS.pdf",
+  "Figure_S1_AllDiastolic_RCS.png",
+  "Figure_S2_OMARX_ClinicalSummary.pdf",
+  "Figure_S3_RCS_vs_OMARX.pdf",
+  "Figure_S4_DeltaEprime_LongitudinalCoupling.pdf",
+  "Figure_S4_DeltaEprime_LongitudinalCoupling.png",
+  "FigureS_CrudeVsAdjusted_NonsigPredictors.pdf",
+  "FigureS_Figure4_LAVi_Unadjusted_GAMM.pdf",
+  "FigureS_Figure4_LAVi_Unadjusted_GAMM.png",
+  "FigureS_Ee_Binary_Trajectories.pdf",
+  "FigureS_Ee_Binary_Trajectories.png",
+  "FigureS_LAVi_Binary_Trajectories.pdf",
+  "FigureS_LAVi_Binary_Trajectories.png",
+  "FigureS_TRV_Binary_Trajectories.pdf",
+  "FigureS_TRV_Binary_Trajectories.png",
+  "Table_S1_OMARX_ModelPerformance.csv",
+  "Table_S2_OMARX_Thresholds.csv",
+  "Table_S3_OMARX_VariableImportance.csv",
+  "Table_S4_OMARX_Summary.docx",
+  "TableS_Figure4_GAMM_Complete.csv",
+  "TableS_Figure4_GAMM_Complete.docx",
+  "TableS_Figure4_GAMM_Sensitivity.csv",
+  "TableS_Figure4_GAMM_Sensitivity.docx",
+  "TableS_Figure4_GAMM_Covariates.csv",
+  "TableS_Figure4_GAMM_Covariates.docx",
+  "TableS_Figure5_Cox_Summary.csv",
+  "TableS_Figure5_Cox_Summary.docx",
+  "TableS_CrudeVsAdjusted_NonsigPredictors.csv",
+  "TableS_Ee_Binary_GAMM_Summary.csv",
+  "TableS_LAVi_Binary_GAMM_Summary.csv",
+  "TableS_TRV_Binary_GAMM_Summary.csv"
+)
+
+for (file in supp_files) {
+  copy_if_exists(
+    file,
+    "../2_Output/Manuscript_Supplemental",
+    c(
+      file.path("../2_Output", file),
+      file.path("../Manuscript/Supplemental", file),
+      file.path("../2_Output/Manuscript_Supplemental", file)
+    )
+  )
+}
+
+section03_files <- c(
+  "Data_CrossSectional_Analysis.csv",
+  "Stats_CrossSectional_LRT_FRIEND2.csv",
+  "Stats_CrossSectional_LRT_VeVco2.csv",
+  "Stats_CrossSectional_LRT_HRR.csv",
+  "Table2_Figure3_RCS_Summary.csv",
+  "Table2_Figure3_RCS_Summary.docx"
+)
+for (file in section03_files) copy_if_exists(file, "../2_Output/Section_03_CrossSectional", c(file.path("../2_Output", file)))
+
+section04_files <- c(
+  "Figure4_Longitudinal_GAMM.pdf",
+  "Figure4_Longitudinal_GAMM.png",
+  "Table3_Figure4_GAMM_Summary.csv",
+  "Table3_Figure4_GAMM_Summary.docx",
+  "FigureS_Figure4_LAVi_Unadjusted_GAMM.pdf",
+  "FigureS_Figure4_LAVi_Unadjusted_GAMM.png",
+  "FigureS_Ee_Binary_Trajectories.pdf",
+  "FigureS_Ee_Binary_Trajectories.png",
+  "FigureS_LAVi_Binary_Trajectories.pdf",
+  "FigureS_LAVi_Binary_Trajectories.png",
+  "FigureS_TRV_Binary_Trajectories.pdf",
+  "FigureS_TRV_Binary_Trajectories.png",
+  "TableS_Figure4_GAMM_Complete.csv",
+  "TableS_Figure4_GAMM_Complete.docx",
+  "TableS_Figure4_GAMM_Sensitivity.csv",
+  "TableS_Figure4_GAMM_Sensitivity.docx",
+  "TableS_Figure4_GAMM_Covariates.csv",
+  "TableS_Figure4_GAMM_Covariates.docx",
+  "TableS_Ee_Binary_GAMM_Summary.csv",
+  "TableS_LAVi_Binary_GAMM_Summary.csv",
+  "TableS_TRV_Binary_GAMM_Summary.csv",
+  "Figure_S4_DeltaEprime_LongitudinalCoupling.pdf",
+  "Figure_S4_DeltaEprime_LongitudinalCoupling.png"
+)
+for (file in section04_files) copy_if_exists(file, "../2_Output/Section_04_Longitudinal", c(file.path("../2_Output", file)))
+
+section05_files <- c(
+  "Figure5_HeartFailure_Outcomes.pdf",
+  "Figure5_HeartFailure_Outcomes.png",
+  "Figure5_HeartFailure_Outcomes_Sensitivity.pdf",
+  "Figure5_HeartFailure_Outcomes_Sensitivity.png",
+  "Table3_Cox_FillingPressure.csv",
+  "Table3_Cox_DDZscore.csv",
+  "Table3_Cox_EEprime.csv",
+  "Table3_Cox_TRVmax.csv",
+  "Table3_Cox_LVOTgradient.csv",
+  "Table3_Cox_SeptalThickness.csv",
+  "Table3_Cox_PeakVO2.csv",
+  "Table3_Cox_VEVCO2.csv",
+  "TableS_Figure5_Cox_Summary.csv",
+  "TableS_Figure5_Cox_Summary.docx",
+  "FigureS_CrudeVsAdjusted_NonsigPredictors.pdf",
+  "TableS_CrudeVsAdjusted_NonsigPredictors.csv",
+  "Table_Sensitivity_Interventions_Summary.csv",
+  "Table_Sensitivity_Interventions_Summary.docx",
+  "Table_Sensitivity_Figure5_BetaBlockerAndIntervention.csv",
+  "Table_Sensitivity_Figure5_BetaBlockerAndIntervention.docx",
+  "Table_Sensitivity_Figure5_Comparison.csv"
+)
+for (file in section05_files) copy_if_exists(file, "../2_Output/Section_05_Outcomes", c(file.path("../2_Output", file)))
+```
+
+::: panel-tabset
 ## Main Figures
 
-``` r
+```{r gallery_main_figures, results='asis'}
 # ── render-end gallery: embed final main figures inline for quick review ───────
 emit_gallery_figure <- function(fig_dir, filename, title = NULL, legend = NULL) {
   if (is.null(title)) {
@@ -5244,119 +6216,23 @@ main_fig_dir <- "../2_Output/Manuscript_Main"
 emit_gallery_figure(main_fig_dir, "Figure1_MatchedControls_and_BaselineCharacteristics.pdf",
   title = "Figure 1",
   legend = if (exists("legend_fig1_pdf")) legend_fig1_pdf else NULL)
-```
-
-### Figure 1
-
-![](2_Output/Manuscript_Main/Figure1_MatchedControls_and_BaselineCharacteristics.png)
-
-**Figure 1. Matched Cohort Validation.** Age-, sex-, and BMI-matched
-controls (CON; gray), non-obstructive HCM (rose), and obstructive HCM
-(LVOT gradient ≥30 mm Hg; steel blue) are compared across maximum wall
-thickness, septal thickness, age-calibrated average e’, left ventricular
-outflow tract gradient, left atrial volume index, and left ventricular
-ejection fraction. Each panel shows kernel density curves with a
-horizontally oriented boxplot and individual patient values.
-
-``` r
 emit_gallery_figure(main_fig_dir, "Figure2_ASE2025_FillingPressure.pdf",
   title = "Figure 2",
   legend = if (exists("legend_fig2_pdf")) legend_fig2_pdf else NULL)
-```
-
-### Figure 2
-
-![](2_Output/Manuscript_Main/Figure2_ASE2025_FillingPressure.png)
-
-**Figure 2. Baseline HCM Diastolic Dysfunction Phenotypes and
-Cardiopulmonary Performance.** **(A)** UpSet plot of the distinct
-combinations of abnormal diastolic dysfunction parameters (E/e’, LAVi,
-and TRV$_max$) among HCM patients.**(B)** Prevalence bar chart showing
-the proportion of HCM patients with each diastolic index exceeding its
-ASE-defined abnormality threshold. **(C)** Peak V̇O$_2$ (FRIEND 2.0 %
-predicted) stratified by combinatorial filling-pressure phenotype, with
-Kruskal-Wallis P value. **(D)** V̇E/V̇CO$_2$ slope stratified by the same
-combinatorial phenotype, with Kruskal-Wallis P value.
-
-``` r
 emit_gallery_figure(main_fig_dir, "Figure3_Nonlinear_DiastolicIndices_RCS.pdf",
   title = "Figure 3",
   legend = if (exists("legend_fig3_pdf")) legend_fig3_pdf else NULL)
-```
-
-### Figure 3
-
-![](2_Output/Manuscript_Main/Figure3_Nonlinear_DiastolicIndices_RCS.png)
-
-**Figure 3. Nonlinear Associations Between Left Ventricular Diastolic
-Dysfunction and Cardiopulmonary Fitness.** Multivariable restricted
-cubic spline models were adjusted for age, sex, BMI, LV septal
-thickness, maximum LVOT gradient, β-blocker use, non-DHP calcium-channel
-blocker use, and hypertension in the exact-date medication-available
-subset. Solid lines represent spline estimates with shaded 95%
-confidence intervals; dashed vertical lines denote ASE abnormality
-thresholds; black dashed lines show the best-fitting piecewise linear
-approximation. Panel annotations report complete-case N, linear-model P
-value, nonlinearity Q value, and spline-vs-linear ΔAIC. **(A)** Peak
-V̇O$_2$ (FRIEND 2.0 % predicted) as a function of E/e’. **(B)** Peak
-V̇O$_2$ (FRIEND 2.0 % predicted) as a function of LAVi. **(C)** Peak
-V̇O$_2$ (FRIEND 2.0 % predicted) as a function of TRV$_max$. **(D)**
-V̇E/V̇CO$_2$ slope as a function of E/e’. **(E)** V̇E/V̇CO$_2$ slope as a
-function of LAVi. **(F)** V̇E/V̇CO$_2$ slope as a function of TRV$_max$.
-
-``` r
 emit_gallery_figure(main_fig_dir, "Figure4_Longitudinal_GAMM.pdf",
   title = "Figure 4",
   legend = if (exists("legend_fig4_pdf")) legend_fig4_pdf else NULL)
-```
-
-### Figure 4
-
-![](2_Output/Manuscript_Main/Figure4_Longitudinal_GAMM.png)
-
-**Figure 4. Longitudinal Cardiopulmonary Trajectories Across Diastolic
-Dysfunction Parameters.** Continuous generalized additive mixed models
-were adjusted for age, sex, and BMI and fit to repeated cardiopulmonary
-measures across the 3 primary HCM diastolic indices. Each diastolic
-parameter was entered as a continuous predictor with a time interaction;
-lines show model-predicted trajectories at the 25th, 50th, and 75th
-percentiles for visualization. **(A)** Peak V̇O$_2$ (FRIEND 2.0 %
-predicted) trajectory across baseline E/e’. **(B)** Peak V̇O$_2$ (FRIEND
-2.0 % predicted) trajectory across baseline LAVi. **(C)** Peak V̇O$_2$
-(FRIEND 2.0 % predicted) trajectory across baseline TRV$_max$. **(D)**
-V̇E/V̇CO$_2$ slope trajectory across baseline E/e’. **(E)** V̇E/V̇CO$_2$
-slope trajectory across baseline LAVi. **(F)** V̇E/V̇CO$_2$ slope
-trajectory across baseline TRV$_max$.
-
-``` r
 emit_gallery_figure(main_fig_dir, "Figure5_HeartFailure_Outcomes.pdf",
   title = "Figure 5",
   legend = if (exists("legend_fig5_pdf")) legend_fig5_pdf else NULL)
 ```
 
-### Figure 5
-
-![](2_Output/Manuscript_Main/Figure5_HeartFailure_Outcomes.png)
-
-**Figure 5. Heart-Failure Outcomes Across ASE Diastolic Dysfunction
-Parameters.** The composite endpoint is heart failure hospitalization,
-heart transplant, or death. Each Cox model was adjusted for age, sex,
-BMI, β-blocker use, and non-DHP calcium-channel blocker use; hazard
-ratios are expressed per standard deviation and plotted on a log scale.
-**(A)** Kaplan-Meier event-free survival stratified by E/e’ ≤14 (normal)
-vs. \>14 (elevated). **(B)** Kaplan-Meier event-free survival stratified
-by LAVi ≤34 mL/m² (normal) vs. \>34 mL/m² (elevated). **(C)**
-Kaplan-Meier event-free survival stratified by TRV$_max$ ≤2.8 m/s
-(normal) vs. \>2.8 m/s (elevated). **(D)** Kaplan-Meier event-free
-survival stratified by composite primary-parameter diastolic dysfunction
-classification (Normal vs. Abnormal). **(E)** Adjusted hazard ratios
-(±95% CI) from separate Cox models for LVDD classification, LAVi
-Z-score, E/e’, TRV$_max$, maximum LVOT gradient, LV septal thickness,
-Peak V̇O$_2$, and V̇E/V̇CO$_2$ slope; filled circles indicate P \< 0.05.
-
 ## Main Tables
 
-``` r
+```{r gallery_main_tables}
 if (!is_gfm_output) {
   table1_overall
   figure3_ft
@@ -5366,7 +6242,7 @@ if (!is_gfm_output) {
 
 ## Supplemental Figures
 
-``` r
+```{r gallery_supp_figures, results='asis'}
 # ── gallery: embed supplemental figures inline ────────────────────────────────
 supp_fig_dir <- "../2_Output/Manuscript_Supplemental"
 
@@ -5380,22 +6256,6 @@ emit_gallery_figure(supp_fig_dir, "Figure_S1_AllDiastolic_RCS.pdf",
     "Annotation boxes report patient count, overall linear-association P value, nonlinearity FDR q-value ",
     "(BH-adjusted within each outcome across all 12 diastolic indices), and ΔAIC (spline vs. linear model)."
   ))
-```
-
-### Figure S1
-
-![](2_Output/Manuscript_Supplemental/Figure_S1_AllDiastolic_RCS.png)
-
-**Figure S1.** Supplemental restricted cubic spline models relating all
-available diastolic parameters to Peak V̇O$_2$ and V̇E/V̇CO$_2$ slope. Each
-panel shows medication-adjusted spline-estimated associations with
-shaded 95% confidence intervals. Dashed blue vertical lines indicate ASE
-reference cutoffs where available. Annotation boxes report patient
-count, overall linear-association P value, nonlinearity FDR q-value
-(BH-adjusted within each outcome across all 12 diastolic indices), and
-ΔAIC (spline vs. linear model).
-
-``` r
 emit_gallery_figure(supp_fig_dir, "Figure_S2_OMARX_ClinicalSummary.pdf",
   title = "Figure S2",
   legend = paste0(
@@ -5404,20 +6264,6 @@ emit_gallery_figure(supp_fig_dir, "Figure_S2_OMARX_ClinicalSummary.pdf",
     "optimal multivariate adaptive regression cross-validation model for diastolic dysfunction classification. ",
     "*(Generated by the OMARX pipeline; see supplemental methods.)*"
   ))
-```
-
-### Figure S2
-
-[Open
-PDF](2_Output/Manuscript_Supplemental/Figure_S2_OMARX_ClinicalSummary.pdf)
-
-**Figure S2.** OMARX clinical summary. Variable importance, threshold
-performance, and clinical calibration of the optimal multivariate
-adaptive regression cross-validation model for diastolic dysfunction
-classification. *(Generated by the OMARX pipeline; see supplemental
-methods.)*
-
-``` r
 emit_gallery_figure(supp_fig_dir, "Figure_S3_RCS_vs_OMARX.pdf",
   title = "Figure S3",
   legend = paste0(
@@ -5425,19 +6271,6 @@ emit_gallery_figure(supp_fig_dir, "Figure_S3_RCS_vs_OMARX.pdf",
     "for nonlinear association modeling of diastolic indices with cardiopulmonary outcomes. ",
     "*(Generated by the OMARX pipeline; see supplemental methods.)*"
   ))
-```
-
-### Figure S3
-
-[Open
-PDF](2_Output/Manuscript_Supplemental/Figure_S3_RCS_vs_OMARX.pdf)
-
-**Figure S3.** Head-to-head comparison of restricted cubic spline and
-OMARX approaches for nonlinear association modeling of diastolic indices
-with cardiopulmonary outcomes. *(Generated by the OMARX pipeline; see
-supplemental methods.)*
-
-``` r
 emit_gallery_figure(supp_fig_dir, "Figure_S4_DeltaEprime_LongitudinalCoupling.pdf",
   title = "Figure S4",
   legend = paste0(
@@ -5446,19 +6279,6 @@ emit_gallery_figure(supp_fig_dir, "Figure_S4_DeltaEprime_LongitudinalCoupling.pd
     "Points represent follow-up studies relative to the first paired observation with both e\u2019 and the ",
     "given outcome available; solid lines and shaded bands show the adjusted mixed-model association."
   ))
-```
-
-### Figure S4
-
-![](2_Output/Manuscript_Supplemental/Figure_S4_DeltaEprime_LongitudinalCoupling.png)
-
-**Figure S4.** Exploratory within-patient longitudinal coupling between
-change in average mitral annular e’ and change in cardiopulmonary
-performance. Points represent follow-up studies relative to the first
-paired observation with both e’ and the given outcome available; solid
-lines and shaded bands show the adjusted mixed-model association.
-
-``` r
 emit_gallery_figure(supp_fig_dir, "FigureS_CrudeVsAdjusted_NonsigPredictors.pdf",
   title = "Figure S: Crude vs. Adjusted HRs",
   legend = paste0(
@@ -5470,25 +6290,6 @@ emit_gallery_figure(supp_fig_dir, "FigureS_CrudeVsAdjusted_NonsigPredictors.pdf"
     "Minimal change in point estimates between crude and adjusted models indicates that covariate ",
     "adjustment does not account for the non-significant associations."
   ))
-```
-
-### Figure S: Crude vs. Adjusted HRs
-
-[Open
-PDF](2_Output/Manuscript_Supplemental/FigureS_CrudeVsAdjusted_NonsigPredictors.pdf)
-
-**Supplemental Figure.** Crude versus adjusted hazard ratios for
-non-significant Figure 5E predictors. Each panel shows the unadjusted
-(circle) and covariate-adjusted (diamond) hazard ratio per 1 SD for
-maximum LVOT gradient, peak V̇O₂ (FRIEND 2.0 % predicted), and V̇E/V̇CO₂
-slope. Adjusted models include age, sex, BMI, β-blocker use, and non-DHP
-CCB use as covariates. Horizontal lines represent 95% confidence
-intervals; the dashed vertical line marks HR = 1. Minimal change in
-point estimates between crude and adjusted models indicates that
-covariate adjustment does not account for the non-significant
-associations.
-
-``` r
 emit_gallery_figure(supp_fig_dir, "FigureS_Figure4_LAVi_Unadjusted_GAMM.pdf",
   title = "Figure S: LAVi Unadjusted Trajectories",
   legend = if (exists("figure4_main_spec")) paste0(
@@ -5502,21 +6303,9 @@ emit_gallery_figure(supp_fig_dir, "FigureS_Figure4_LAVi_Unadjusted_GAMM.pdf",
   ) else NULL)
 ```
 
-### Figure S: LAVi Unadjusted Trajectories
-
-![](2_Output/Manuscript_Supplemental/FigureS_Figure4_LAVi_Unadjusted_GAMM.png)
-
-**Supplemental Figure.** Unadjusted longitudinal cardiopulmonary
-trajectories stratified by binary baseline LAVi (mL/m²) status. **(A)**
-GAMM-derived Peak V̇O$_2$ trajectories. **(B)** GAMM-derived V̇E/V̇CO$_2$
-slope trajectories. **(C)** Summary of key status and interaction terms
-for both models. Normal versus abnormal status was defined as Normal ≤
-34 mL/m² \| Abnormal \> 34 mL/m². These sensitivity GAMMs were
-unadjusted for demographic, medication, or diabetes covariates.
-
 ## Supplemental Tables
 
-``` r
+```{r gallery_supp_tables, results='asis'}
 # ── gallery: render supplemental CSV tables inline ────────────────────────────
 supp_table_files <- c(
   "Table_S1_OMARX_ModelPerformance.csv",
@@ -5552,247 +6341,70 @@ for (tbl_file in supp_table_files) {
   }
 }
 ```
+:::
 
-### Table S1 OMARX ModelPerformance
+# Preprint Assembly {#sec-preprint}
 
-a flextable object. col_keys: `outcome`, `mode`, `predictor_set_name`,
-`qc_variant`, `n_complete`, `n`, `r2`, `adj_r2`, `aic`, `bic`,
-`n_predictors`, `clinical_knots_protected`, `outcome_label` header has 1
-row(s) body has 11 row(s) original dataset sample: ‘data.frame’: 11 obs.
-of 13 variables: \$ outcome : chr “VO2_FRIEND2_PP” “VO2_FRIEND2_PP”
-“VO2_FRIEND2_PP” “VO2_FRIEND2_PP” … \$ mode : chr “mars” “additive”
-“mars” “mars” … \$ predictor_set_name : chr “heart_bmi_primary”
-“heart_bmi_primary” “heart_trv_missing_sensitivity”
-“heart_binary_lvot_sensitivity” … \$ qc_variant : chr “complete_case”
-“complete_case” “trv_missing_sensitivity” “binary_lvot_sensitivity” … \$
-n_complete : int 108 108 191 159 444 108 108 191 160 443 … \$ n : int
-108 108 191 159 444 108 108 191 160 443 … \$ r2 : num 0.162 0.196 0.152
-0.178 0.232 0.122 0.157 0.106 0.144 0.169 … \$ adj_r2 : num 0.085 0.044
-0.105 0.128 0.214 0.041 -0.003 0.056 0.093 0.15 … \$ aic : num 1102 1113
-1928 1588 4367 … \$ bic : num 1129 1162 1964 1619 4412 … \$ n_predictors
-: int 9 9 10 9 9 9 9 10 9 9 … \$ clinical_knots_protected: logi FALSE
-FALSE FALSE FALSE FALSE FALSE … \$ outcome_label : chr “Peak VO₂ (%
-Predicted)” “Peak VO₂ (% Predicted)” “Peak VO₂ (% Predicted)” “Peak VO₂
-(% Predicted)” …
+This section assembles the dated submission packages for MedRxiv preprint and JAMA Cardiology submission. Main figures (Figures 1–5) are combined into a single PDF; supplemental figures are combined into a second PDF. Both are stamped with today's date (`YYMMDD`).
 
-### Table S2 OMARX Thresholds
+```{r preprint_assembly, include=FALSE}
+# ── bundle dated preprint package (figures + tables + manuscript) ──────────────
+date_stamp <- format(Sys.Date(), "%y%m%d")
 
-a flextable object. col_keys: `outcome`, `mode`, `predictor_set_name`,
-`qc_variant`, `variable`, `knot`, `n_basis_terms`,
-`max_abs_coefficient`, `direction`, `ase_cutoff`, `ase_direction`,
-`outcome_label`, `var_label`, `delta_vs_ase` header has 1 row(s) body
-has 16 row(s) original dataset sample: ‘data.frame’: 16 obs. of 14
-variables: \$ outcome : chr “VO2_FRIEND2_PP” “VO2_FRIEND2_PP”
-“VO2_FRIEND2_PP” “VO2_FRIEND2_PP” … \$ mode : chr “additive” “additive”
-“additive” “additive” … \$ predictor_set_name : chr “heart_bmi_primary”
-“heart_bmi_primary” “heart_bmi_primary” “heart_bmi_primary” … \$
-qc_variant : chr “complete_case” “complete_case” “complete_case”
-“complete_case” … \$ variable : chr “e_e_ave” “la_vol_index”
-“lv_septal_thickness” “med_peak_e_vel” … \$ knot : num 11.21 35.88 1.68
-5.29 235.06 … \$ n_basis_terms : int 1 1 1 1 1 1 1 1 1 1 … \$
-max_abs_coefficient: num 11.86 11.78 3.27 13.99 21.79 … \$ direction :
-chr “positive” “negative” “positive” “negative” … \$ ase_cutoff : int 14
-34 NA NA 280 280 14 34 NA NA … \$ ase_direction : chr “\>” “\>” NA NA …
-\$ outcome_label : chr “Peak VO₂ (% Predicted)” “Peak VO₂ (% Predicted)”
-“Peak VO₂ (% Predicted)” “Peak VO₂ (% Predicted)” … \$ var_label : chr
-“E/e’ (average)” “LAVI” “LV septal thickness” “Medial septal e’” … \$
-delta_vs_ase : num -2.79 1.88 NA NA -44.94 …
+main_figure_files <- c(
+  "../2_Output/Manuscript_Main/Figure1_MatchedControls_and_BaselineCharacteristics.pdf",
+  "../2_Output/Manuscript_Main/Figure2_ASE2025_FillingPressure.pdf",
+  "../2_Output/Manuscript_Main/Figure3_Nonlinear_DiastolicIndices_RCS.pdf",
+  "../2_Output/Manuscript_Main/Figure4_Longitudinal_GAMM.pdf",
+  "../2_Output/Manuscript_Main/Figure5_HeartFailure_Outcomes.pdf"
+)
 
-### Table S3 OMARX VariableImportance
+supp_figure_files <- c(
+  "../2_Output/Manuscript_Supplemental/Figure_S1_AllDiastolic_RCS.pdf",
+  "../2_Output/Manuscript_Supplemental/Figure_S2_OMARX_ClinicalSummary.pdf",
+  "../2_Output/Manuscript_Supplemental/Figure_S3_RCS_vs_OMARX.pdf",
+  "../2_Output/Manuscript_Supplemental/Figure_S4_DeltaEprime_LongitudinalCoupling.pdf",
+  "../2_Output/Manuscript_Supplemental/FigureS_CrudeVsAdjusted_NonsigPredictors.pdf",
+  "../2_Output/Manuscript_Supplemental/FigureS_Figure4_LAVi_Unadjusted_GAMM.pdf",
+  "../2_Output/Manuscript_Supplemental/FigureS_Ee_Binary_Trajectories.pdf",
+  "../2_Output/Manuscript_Supplemental/FigureS_LAVi_Binary_Trajectories.pdf",
+  "../2_Output/Manuscript_Supplemental/FigureS_TRV_Binary_Trajectories.pdf"
+)
 
-a flextable object. col_keys: `variable`, `n_terms`,
-`metric_standalone`, `metric_drop`, `pct_drop`, `outcome`, `mode`,
-`predictor_set_name`, `qc_variant`, `outcome_label`, `var_label` header
-has 1 row(s) body has 101 row(s) original dataset sample: ‘data.frame’:
-101 obs. of 11 variables: \$ variable : chr “age” “BMI” “med_peak_e_vel”
-“tr_max_vel” … \$ n_terms : int 1 1 1 1 1 1 1 1 1 2 … \$
-metric_standalone : num 0.078 0.04 0.055 0 0.013 0.005 0 0.01 0.001
-0.079 … \$ metric_drop : num 0.058 0.029 0.019 0.01 0.002 0.001 0.001 0
-0 0.051 … \$ pct_drop : num 35.8 17.7 11.8 6.3 1.2 0.7 0.6 0.2 0.1 25.9
-… \$ outcome : chr “VO2_FRIEND2_PP” “VO2_FRIEND2_PP” “VO2_FRIEND2_PP”
-“VO2_FRIEND2_PP” … \$ mode : chr “mars” “mars” “mars” “mars” … \$
-predictor_set_name: chr “heart_bmi_primary” “heart_bmi_primary”
-“heart_bmi_primary” “heart_bmi_primary” … \$ qc_variant : chr
-“complete_case” “complete_case” “complete_case” “complete_case” … \$
-outcome_label : chr “Peak VO₂ (% Predicted)” “Peak VO₂ (% Predicted)”
-“Peak VO₂ (% Predicted)” “Peak VO₂ (% Predicted)” … \$ var_label : chr
-“Age” “BMI” “Medial septal e’” “TR Vmax” …
+assemble_pdf <- function(input_paths, output_path) {
+  existing <- input_paths[file.exists(input_paths)]
+  if (length(existing) == 0) {
+    message("No input PDFs found for: ", output_path)
+    return(invisible(NULL))
+  }
+  missing <- setdiff(input_paths, existing)
+  if (length(missing) > 0) {
+    message("Skipping missing files: ", paste(basename(missing), collapse = ", "))
+  }
+  tryCatch({
+    pdftools::pdf_combine(existing, output_path)
+    message("Assembled: ", output_path)
+  }, error = function(e) {
+    message("pdftools::pdf_combine failed (", conditionMessage(e), "); trying qpdf fallback")
+    tryCatch(
+      qpdf::pdf_combine(existing, output_path),
+      error = function(e2) message("Assembly failed: ", conditionMessage(e2))
+    )
+  })
+}
 
-### Table S4 OMARX Summary
+main_combined_output  <- sprintf("../Manuscript/HCM.Diastology_Figures_%s.pdf", date_stamp)
+supp_combined_output  <- sprintf("../Manuscript/Supplemental_Figures_%s.pdf", date_stamp)
 
-Table available at:
-`../2_Output/Manuscript_Supplemental/Table_S4_OMARX_Summary.docx`
-
-### TableS Figure5 Cox Summary
-
-a flextable object. col_keys: `Model`, `Parameter`, `Scale`, `Sample`,
-`HR..95..CI.`, `P.value` header has 1 row(s) body has 13 row(s) original
-dataset sample: ‘data.frame’: 13 obs. of 6 variables: \$ Model : chr
-“Composite LVDD model” “Composite LVDD model” “Composite LVDD model”
-“Composite LVDD model” … \$ Parameter : chr “LVDD” “Age” “Female sex”
-“BMI” … \$ Scale : chr “Elevated vs not elevated” “Per 1-year increase”
-“Female vs male” “Per 1 kg/m² increase” … \$ Sample : chr “244 / 82”
-“244 / 82” “244 / 82” “244 / 82” … \$ HR..95..CI.: chr “2.37
-(1.51-3.70)” “1.00 (0.99-1.01)” “1.35 (0.87-2.12)” “1.05 (1.01-1.09)” …
-\$ P.value : chr “1.55 × 10⁻⁴” “9.69 × 10⁻¹” “1.83 × 10⁻¹” “1.48 × 10⁻²”
-…
-
-### TableS Figure5 Cox Summary
-
-Table available at:
-`../2_Output/Manuscript_Supplemental/TableS_Figure5_Cox_Summary.docx`
-
-### TableS Figure4 GAMM Complete
-
-a flextable object. col_keys: `Outcome`, `Baseline.Parameter`, `Sample`,
-`Fit`, `Term.Class`, `Term`, `Effect.summary`, `Statistic`, `P.value`
-header has 1 row(s) body has 42 row(s) original dataset sample:
-‘data.frame’: 42 obs. of 9 variables: \$ Outcome : chr “Peak V̇O2” “Peak
-V̇O2” “Peak V̇O2” “Peak V̇O2” … \$ Baseline.Parameter: chr “E/e’ (average)”
-“E/e’ (average)” “E/e’ (average)” “E/e’ (average)” … \$ Sample : chr
-“533 / 176” “533 / 176” “533 / 176” “533 / 176” … \$ Fit : chr “Smooth
-GAMM” “Smooth GAMM” “Smooth GAMM” “Smooth GAMM” … \$ Term.Class : chr
-“Smooth” “Smooth” “Parametric” “Parametric” … \$ Term : chr “Time
-smooth” “Time × abnormal E/e’ status” “Abnormal E/e’ status” “Age” … \$
-Effect.summary : chr “edf = 1.04; ref df = 1.04” “edf = 1.03; ref df =
-1.03” “β = 1.06; SE = 3.99” “β = -0.72; SE = 0.09” … \$ Statistic : chr
-“F = 0.00” “F = 0.24” “t = 0.27” “t = -7.81” … \$ P.value : chr “0.998”
-“0.628” “0.791” “\<0.001” …
-
-### TableS Figure4 GAMM Complete
-
-Table available at:
-`../2_Output/Manuscript_Supplemental/TableS_Figure4_GAMM_Complete.docx`
-
-### TableS Figure4 GAMM Sensitivity
-
-a flextable object. col_keys: `Outcome`, `Baseline.Parameter`,
-`Relationship.Term`, `Model`, `Sample`, `Fit`, `Effect.summary`,
-`Statistic`, `P.value` header has 1 row(s) body has 48 row(s) original
-dataset sample: ‘data.frame’: 48 obs. of 9 variables: \$ Outcome : chr
-“Peak V̇O2” “Peak V̇O2” “Peak V̇O2” “Peak V̇O2” … \$ Baseline.Parameter: chr
-“E/e’ (average)” “E/e’ (average)” “E/e’ (average)” “E/e’ (average)” … \$
-Relationship.Term : chr “Abnormal E/e’ status” “Abnormal E/e’ status”
-“Abnormal E/e’ status” “Abnormal E/e’ status” … \$ Model : chr
-“Unadjusted” “Age, sex, BMI adjusted” “Age, sex, BMI + medication
-adjusted” “Age, sex, BMI + medication + diabetes adjusted” … \$ Sample :
-chr “533 / 176” “533 / 176” “207 / 123” “204 / 122” … \$ Fit : chr
-“Smooth GAMM” “Smooth GAMM” “Smooth GAMM” “Smooth GAMM” … \$
-Effect.summary : chr “β = -0.26; SE = 4.44” “β = 1.06; SE = 3.99” “β =
--2.01; SE = 5.97” “β = -1.65; SE = 5.90” … \$ Statistic : chr “t =
--0.06” “t = 0.27” “t = -0.34” “t = -0.28” … \$ P.value : chr “0.952”
-“0.791” “0.736” “0.781” …
-
-### TableS Figure4 GAMM Sensitivity
-
-Table available at:
-`../2_Output/Manuscript_Supplemental/TableS_Figure4_GAMM_Sensitivity.docx`
-
-### TableS Figure4 GAMM Covariates
-
-a flextable object. col_keys: `Outcome`, `Baseline.Parameter`, `Sample`,
-`Covariate`, `β`, `SE`, `Statistic`, `P.value` header has 1 row(s) body
-has 18 row(s) original dataset sample: ‘data.frame’: 18 obs. of 8
-variables: \$ Outcome : chr “Peak V̇O2” “Peak V̇O2” “Peak V̇O2” “Peak V̇O2”
-… \$ Baseline.Parameter: chr “E/e’ (average)” “E/e’ (average)” “E/e’
-(average)” “LAVi (mL/m²)” … \$ Sample : chr “533 / 176” “533 / 176” “533
-/ 176” “533 / 176” … \$ Covariate : chr “Age” “Female sex” “BMI” “Age” …
-\$ β : num -0.72 -2.87 -1.5 -0.72 -2.9 -1.5 -0.72 -2.82 -1.52 0.01 … \$
-SE : num 0.09 3.46 0.27 0.09 3.44 0.27 0.09 3.45 0.27 0.01 … \$
-Statistic : chr “t = -7.81” “t = -0.83” “t = -5.65” “t = -7.84” … \$
-P.value : chr “\<0.001” “0.407” “\<0.001” “\<0.001” …
-
-### TableS Figure4 GAMM Covariates
-
-Table available at:
-`../2_Output/Manuscript_Supplemental/TableS_Figure4_GAMM_Covariates.docx`
-
-</div>
-
-# Preprint Assembly
-
-This section assembles the dated submission packages for MedRxiv
-preprint and JAMA Cardiology submission. Main figures (Figures 1–5) are
-combined into a single PDF; supplemental figures are combined into a
-second PDF. Both are stamped with today’s date (`YYMMDD`).
+assemble_pdf(main_figure_files,  main_combined_output)
+assemble_pdf(supp_figure_files,  supp_combined_output)
+```
 
 # Session Info
 
-The complete R session environment used to produce all results is
-recorded below for reproducibility, including the R version, operating
-platform, and exact package versions for all loaded libraries. Any
-numerical discrepancies between these results and a reader’s local
-environment may reflect version-specific behavior in statistical
-packages (e.g., `mgcv`, `survival`, `gamlss`). All analyses were
-conducted with the package versions listed.
+The complete R session environment used to produce all results is recorded below for reproducibility, including the R version, operating platform, and exact package versions for all loaded libraries. Any numerical discrepancies between these results and a reader's local environment may reflect version-specific behavior in statistical packages (e.g., `mgcv`, `survival`, `gamlss`). All analyses were conducted with the package versions listed.
 
-``` r
+```{r session_info}
 cat("\n\n---\n**Session Info:**\n")
-```
-
-
-
-    ---
-    **Session Info:**
-
-``` r
 sessionInfo()
 ```
-
-    R version 4.5.2 (2025-10-31)
-    Platform: aarch64-apple-darwin20
-    Running under: macOS Tahoe 26.3.1
-
-    Matrix products: default
-    BLAS:   /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib 
-    LAPACK: /Library/Frameworks/R.framework/Versions/4.5-arm64/Resources/lib/libRlapack.dylib;  LAPACK version 3.12.1
-
-    locale:
-    [1] C.UTF-8/C.UTF-8/C.UTF-8/C/C.UTF-8/C.UTF-8
-
-    time zone: America/Los_Angeles
-    tzcode source: internal
-
-    attached base packages:
-     [1] grid      parallel  splines   stats     graphics  grDevices utils    
-     [8] datasets  methods   base     
-
-    other attached packages:
-     [1] lavaan_0.6-21      digest_0.6.39      cobalt_4.6.2       MatchIt_4.7.2     
-     [5] forcats_1.0.1      ggtext_0.1.2       gamlss_5.5-0       gamlss.dist_6.1-1 
-     [9] gamlss.data_6.0-7  ggrepel_0.9.6      viridis_0.6.5      viridisLite_0.4.3 
-    [13] ggcorrplot_0.1.4.1 flextable_0.9.10   gtsummary_2.5.0    openxlsx_4.2.8.1  
-    [17] stringr_1.6.0      scales_1.4.0       survival_3.8-6     broom_1.0.12      
-    [21] mgcv_1.9-4         nlme_3.1-168       lme4_1.1-38        Matrix_1.7-4      
-    [25] patchwork_1.3.2    ggplot2_4.0.2      purrr_1.2.1        tidyr_1.3.2       
-    [29] dplyr_1.2.0       
-
-    loaded via a namespace (and not attached):
-     [1] Rdpack_2.6.6            mnormt_2.1.2            dunn.test_1.3.7        
-     [4] gridExtra_2.3           rlang_1.1.7             magrittr_2.0.4         
-     [7] otel_0.2.0              compiler_4.5.2          systemfonts_1.3.1      
-    [10] vctrs_0.7.1             quadprog_1.5-8          pkgconfig_2.0.3        
-    [13] fastmap_1.2.0           backports_1.5.0         labeling_0.4.3         
-    [16] pbivnorm_0.6.0          rmarkdown_2.30          markdown_2.0           
-    [19] nloptr_2.2.1            ragg_1.5.0              xfun_0.56              
-    [22] litedown_0.9            jsonlite_2.0.0          uuid_1.2-2             
-    [25] chk_0.10.0              cluster_2.1.8.2         R6_2.6.1               
-    [28] stringi_1.8.7           RColorBrewer_1.1-3      rpart_4.1.24           
-    [31] boot_1.3-32             Rcpp_1.1.1              knitr_1.51             
-    [34] base64enc_0.1-6         nnet_7.3-20             tidyselect_1.2.1       
-    [37] rstudioapi_0.18.0       dichromat_2.0-0.1       yaml_2.3.12            
-    [40] qpdf_1.4.1              lattice_0.22-9          tibble_3.3.1           
-    [43] withr_3.0.2             S7_0.2.1                askpass_1.2.1          
-    [46] evaluate_1.0.5          foreign_0.8-91          zip_2.3.3              
-    [49] xml2_1.5.2              pillar_1.11.1           checkmate_2.3.4        
-    [52] stats4_4.5.2            reformulas_0.4.4        generics_0.1.4         
-    [55] commonmark_2.0.0        minqa_1.2.8             glue_1.8.0             
-    [58] gdtools_0.5.0           Hmisc_5.2-5             tools_4.5.2            
-    [61] data.table_1.18.2.1     pdftools_3.9.0          rbibutils_2.4.1        
-    [64] cards_0.7.1             colorspace_2.1-2        htmlTable_2.4.3        
-    [67] cardx_0.3.2             Formula_1.2-5           cli_3.6.5              
-    [70] textshaping_1.0.4       officer_0.7.3           fontBitstreamVera_0.1.1
-    [73] svglite_2.2.2           gtable_0.3.6            fontquiver_0.2.1       
-    [76] htmlwidgets_1.6.4       farver_2.1.2            htmltools_0.5.9        
-    [79] lifecycle_1.0.5         fontLiberation_0.1.0    gridtext_0.1.6         
-    [82] openssl_2.3.4           MASS_7.3-65            
