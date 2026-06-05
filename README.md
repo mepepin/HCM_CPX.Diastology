@@ -1,5 +1,4 @@
-# Modeling Left Ventricular Diastolic Dysfunction and Cardiopulmonary
-Fitness in HCM
+# Modeling Left Ventricular Diastolic Dysfunction and Cardiopulmonary Fitness in HCM
 Mark E. Pepin, MD, PhD, MS, FESC
 2026-06-05
 
