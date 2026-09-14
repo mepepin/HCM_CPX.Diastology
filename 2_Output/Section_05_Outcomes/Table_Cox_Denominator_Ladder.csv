@@ -1,0 +1,13 @@
+"Parameter","Tier","N","Events"
+"E/e'","Primary: parameter + age/sex/BMI",259,62
+"E/e'","Sensitivity: + apical morphology",223,53
+"E/e'","Sensitivity: + validated LVOT gradient",189,44
+"E/e'","Sensitivity: expanded structure/medications/hypertension",110,29
+"LAVi","Primary: parameter + age/sex/BMI",259,62
+"LAVi","Sensitivity: + apical morphology",223,53
+"LAVi","Sensitivity: + validated LVOT gradient",189,44
+"LAVi","Sensitivity: expanded structure/medications/hypertension",110,29
+"TRVmax","Primary: parameter + age/sex/BMI",144,36
+"TRVmax","Sensitivity: + apical morphology",121,31
+"TRVmax","Sensitivity: + validated LVOT gradient",108,27
+"TRVmax","Sensitivity: expanded structure/medications/hypertension",59,16

@@ -1,0 +1,6 @@
+"Metric","Value","Unit"
+"HCM flags among eligible comparators",0,"patients"
+"Resting LVOT gradient >=30 mm Hg among eligible comparators",0,"patients"
+"Maximum resting LVOT gradient among eligible comparators",10.67,"mm Hg"
+"Minimum LVEF among eligible comparators",50.09,"%"
+"Maximum LV wall thickness among eligible comparators",1.29,"cm"

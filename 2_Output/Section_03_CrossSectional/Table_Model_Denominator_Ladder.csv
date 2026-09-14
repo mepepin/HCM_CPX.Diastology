@@ -1,0 +1,19 @@
+"Outcome","Parameter","Tier","N"
+"Peak VO2","E/e'","Primary: parameter + age/sex/BMI",261
+"Peak VO2","E/e'","Sensitivity: + septal thickness/LVOT gradient",190
+"Peak VO2","E/e'","Sensitivity: + structure/medications/hypertension",111
+"Peak VO2","LAVi","Primary: parameter + age/sex/BMI",261
+"Peak VO2","LAVi","Sensitivity: + septal thickness/LVOT gradient",190
+"Peak VO2","LAVi","Sensitivity: + structure/medications/hypertension",111
+"Peak VO2","TRVmax","Primary: parameter + age/sex/BMI",145
+"Peak VO2","TRVmax","Sensitivity: + septal thickness/LVOT gradient",109
+"Peak VO2","TRVmax","Sensitivity: + structure/medications/hypertension",60
+"VE/VCO2 slope","E/e'","Primary: parameter + age/sex/BMI",261
+"VE/VCO2 slope","E/e'","Sensitivity: + septal thickness/LVOT gradient",190
+"VE/VCO2 slope","E/e'","Sensitivity: + structure/medications/hypertension",111
+"VE/VCO2 slope","LAVi","Primary: parameter + age/sex/BMI",261
+"VE/VCO2 slope","LAVi","Sensitivity: + septal thickness/LVOT gradient",190
+"VE/VCO2 slope","LAVi","Sensitivity: + structure/medications/hypertension",111
+"VE/VCO2 slope","TRVmax","Primary: parameter + age/sex/BMI",145
+"VE/VCO2 slope","TRVmax","Sensitivity: + septal thickness/LVOT gradient",109
+"VE/VCO2 slope","TRVmax","Sensitivity: + structure/medications/hypertension",60

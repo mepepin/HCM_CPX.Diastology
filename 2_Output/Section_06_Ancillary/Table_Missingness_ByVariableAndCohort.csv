@@ -1,0 +1,111 @@
+"Cohort","Variable","Label","Role","Type","N_total","N_observed","N_missing","Percent_missing"
+"Phenotypic HCM entry","age","Age","Primary covariate","continuous",440,440,0,0
+"Phenotypic HCM entry","Sex","Sex","Primary covariate","categorical",440,440,0,0
+"Phenotypic HCM entry","BMI","BMI","Primary covariate","continuous",440,440,0,0
+"Phenotypic HCM entry","e_e_ave","Average E/e'","Cohort-defining exposure","continuous",440,316,124,28.1818181818182
+"Phenotypic HCM entry","la_vol_index","LAVi","Cohort-defining exposure","continuous",440,300,140,31.8181818181818
+"Phenotypic HCM entry","tr_max_vel","TRVmax","Available-case exposure","continuous",440,248,192,43.6363636363636
+"Phenotypic HCM entry","VO2_FRIEND2_PP","Peak VO2 (FRIEND 2.0 % predicted)","Outcome","continuous",440,439,1,0.227272727272727
+"Phenotypic HCM entry","VeVco2_slope","VE/VCO2 slope","Outcome","continuous",440,437,3,0.681818181818182
+"Phenotypic HCM entry","HRR","Heart-rate recovery","Secondary outcome","continuous",440,386,54,12.2727272727273
+"Phenotypic HCM entry","lv_max_wall_thickness","Maximum LV wall thickness","Structural sensitivity covariate","continuous",440,438,2,0.454545454545455
+"Phenotypic HCM entry","lv_septal_thickness","LV septal thickness","Structural sensitivity covariate","continuous",440,438,2,0.454545454545455
+"Phenotypic HCM entry","lvot_max_gradient","Resting maximum LVOT gradient","Structural sensitivity covariate","continuous",440,275,165,37.5
+"Phenotypic HCM entry","apical_hcm","Apical HCM morphology","Morphology sensitivity covariate","binary",440,394,46,10.4545454545455
+"Phenotypic HCM entry","HCM_Phenotype","HCM phenotype","Descriptive phenotype","categorical",440,394,46,10.4545454545455
+"Phenotypic HCM entry","bb_any","Beta-blocker use","Medication sensitivity covariate","binary",440,294,146,33.1818181818182
+"Phenotypic HCM entry","ndhp_ccb_any","Non-DHP calcium-channel blocker use","Medication sensitivity covariate","binary",440,230,210,47.7272727272727
+"Phenotypic HCM entry","htn_pre_test","Hypertension","Clinical sensitivity covariate","binary",440,319,121,27.5
+"Phenotypic HCM entry","dm_pre_test","Diabetes","Clinical sensitivity covariate","binary",440,319,121,27.5
+"Phenotypic HCM entry","ef_modsp4","LVEF","Descriptive echocardiographic variable","continuous",440,278,162,36.8181818181818
+"Phenotypic HCM entry","e_prime_ave","Average e'","Descriptive diastolic variable","continuous",440,328,112,25.4545454545455
+"Phenotypic HCM entry","hf_composite","Primary clinical composite status","Outcome","binary",440,440,0,0
+"Phenotypic HCM entry","last_enc_date","Last encounter date","Follow-up","date",440,440,0,0
+"E/e' + LAVi analytic cohort","age","Age","Primary covariate","continuous",261,261,0,0
+"E/e' + LAVi analytic cohort","Sex","Sex","Primary covariate","categorical",261,261,0,0
+"E/e' + LAVi analytic cohort","BMI","BMI","Primary covariate","continuous",261,261,0,0
+"E/e' + LAVi analytic cohort","e_e_ave","Average E/e'","Cohort-defining exposure","continuous",261,261,0,0
+"E/e' + LAVi analytic cohort","la_vol_index","LAVi","Cohort-defining exposure","continuous",261,261,0,0
+"E/e' + LAVi analytic cohort","tr_max_vel","TRVmax","Available-case exposure","continuous",261,145,116,44.4444444444444
+"E/e' + LAVi analytic cohort","VO2_FRIEND2_PP","Peak VO2 (FRIEND 2.0 % predicted)","Outcome","continuous",261,261,0,0
+"E/e' + LAVi analytic cohort","VeVco2_slope","VE/VCO2 slope","Outcome","continuous",261,261,0,0
+"E/e' + LAVi analytic cohort","HRR","Heart-rate recovery","Secondary outcome","continuous",261,240,21,8.04597701149425
+"E/e' + LAVi analytic cohort","lv_max_wall_thickness","Maximum LV wall thickness","Structural sensitivity covariate","continuous",261,261,0,0
+"E/e' + LAVi analytic cohort","lv_septal_thickness","LV septal thickness","Structural sensitivity covariate","continuous",261,261,0,0
+"E/e' + LAVi analytic cohort","lvot_max_gradient","Resting maximum LVOT gradient","Structural sensitivity covariate","continuous",261,190,71,27.2030651340996
+"E/e' + LAVi analytic cohort","apical_hcm","Apical HCM morphology","Morphology sensitivity covariate","binary",261,225,36,13.7931034482759
+"E/e' + LAVi analytic cohort","HCM_Phenotype","HCM phenotype","Descriptive phenotype","categorical",261,225,36,13.7931034482759
+"E/e' + LAVi analytic cohort","bb_any","Beta-blocker use","Medication sensitivity covariate","binary",261,200,61,23.3716475095785
+"E/e' + LAVi analytic cohort","ndhp_ccb_any","Non-DHP calcium-channel blocker use","Medication sensitivity covariate","binary",261,158,103,39.463601532567
+"E/e' + LAVi analytic cohort","htn_pre_test","Hypertension","Clinical sensitivity covariate","binary",261,211,50,19.1570881226054
+"E/e' + LAVi analytic cohort","dm_pre_test","Diabetes","Clinical sensitivity covariate","binary",261,211,50,19.1570881226054
+"E/e' + LAVi analytic cohort","ef_modsp4","LVEF","Descriptive echocardiographic variable","continuous",261,198,63,24.1379310344828
+"E/e' + LAVi analytic cohort","e_prime_ave","Average e'","Descriptive diastolic variable","continuous",261,261,0,0
+"E/e' + LAVi analytic cohort","hf_composite","Primary clinical composite status","Outcome","binary",261,261,0,0
+"E/e' + LAVi analytic cohort","last_enc_date","Last encounter date","Follow-up","date",261,261,0,0
+"TRVmax-measured subset","age","Age","Primary covariate","continuous",145,145,0,0
+"TRVmax-measured subset","Sex","Sex","Primary covariate","categorical",145,145,0,0
+"TRVmax-measured subset","BMI","BMI","Primary covariate","continuous",145,145,0,0
+"TRVmax-measured subset","e_e_ave","Average E/e'","Cohort-defining exposure","continuous",145,145,0,0
+"TRVmax-measured subset","la_vol_index","LAVi","Cohort-defining exposure","continuous",145,145,0,0
+"TRVmax-measured subset","tr_max_vel","TRVmax","Available-case exposure","continuous",145,145,0,0
+"TRVmax-measured subset","VO2_FRIEND2_PP","Peak VO2 (FRIEND 2.0 % predicted)","Outcome","continuous",145,145,0,0
+"TRVmax-measured subset","VeVco2_slope","VE/VCO2 slope","Outcome","continuous",145,145,0,0
+"TRVmax-measured subset","HRR","Heart-rate recovery","Secondary outcome","continuous",145,136,9,6.20689655172414
+"TRVmax-measured subset","lv_max_wall_thickness","Maximum LV wall thickness","Structural sensitivity covariate","continuous",145,145,0,0
+"TRVmax-measured subset","lv_septal_thickness","LV septal thickness","Structural sensitivity covariate","continuous",145,145,0,0
+"TRVmax-measured subset","lvot_max_gradient","Resting maximum LVOT gradient","Structural sensitivity covariate","continuous",145,109,36,24.8275862068966
+"TRVmax-measured subset","apical_hcm","Apical HCM morphology","Morphology sensitivity covariate","binary",145,122,23,15.8620689655172
+"TRVmax-measured subset","HCM_Phenotype","HCM phenotype","Descriptive phenotype","categorical",145,122,23,15.8620689655172
+"TRVmax-measured subset","bb_any","Beta-blocker use","Medication sensitivity covariate","binary",145,104,41,28.2758620689655
+"TRVmax-measured subset","ndhp_ccb_any","Non-DHP calcium-channel blocker use","Medication sensitivity covariate","binary",145,81,64,44.1379310344828
+"TRVmax-measured subset","htn_pre_test","Hypertension","Clinical sensitivity covariate","binary",145,111,34,23.448275862069
+"TRVmax-measured subset","dm_pre_test","Diabetes","Clinical sensitivity covariate","binary",145,111,34,23.448275862069
+"TRVmax-measured subset","ef_modsp4","LVEF","Descriptive echocardiographic variable","continuous",145,111,34,23.448275862069
+"TRVmax-measured subset","e_prime_ave","Average e'","Descriptive diastolic variable","continuous",145,145,0,0
+"TRVmax-measured subset","hf_composite","Primary clinical composite status","Outcome","binary",145,145,0,0
+"TRVmax-measured subset","last_enc_date","Last encounter date","Follow-up","date",145,145,0,0
+"Longitudinal patient subset","age","Age","Primary covariate","continuous",105,105,0,0
+"Longitudinal patient subset","Sex","Sex","Primary covariate","categorical",105,105,0,0
+"Longitudinal patient subset","BMI","BMI","Primary covariate","continuous",105,105,0,0
+"Longitudinal patient subset","e_e_ave","Average E/e'","Cohort-defining exposure","continuous",105,105,0,0
+"Longitudinal patient subset","la_vol_index","LAVi","Cohort-defining exposure","continuous",105,105,0,0
+"Longitudinal patient subset","tr_max_vel","TRVmax","Available-case exposure","continuous",105,63,42,40
+"Longitudinal patient subset","VO2_FRIEND2_PP","Peak VO2 (FRIEND 2.0 % predicted)","Outcome","continuous",105,105,0,0
+"Longitudinal patient subset","VeVco2_slope","VE/VCO2 slope","Outcome","continuous",105,105,0,0
+"Longitudinal patient subset","HRR","Heart-rate recovery","Secondary outcome","continuous",105,93,12,11.4285714285714
+"Longitudinal patient subset","lv_max_wall_thickness","Maximum LV wall thickness","Structural sensitivity covariate","continuous",105,105,0,0
+"Longitudinal patient subset","lv_septal_thickness","LV septal thickness","Structural sensitivity covariate","continuous",105,105,0,0
+"Longitudinal patient subset","lvot_max_gradient","Resting maximum LVOT gradient","Structural sensitivity covariate","continuous",105,79,26,24.7619047619048
+"Longitudinal patient subset","apical_hcm","Apical HCM morphology","Morphology sensitivity covariate","binary",105,93,12,11.4285714285714
+"Longitudinal patient subset","HCM_Phenotype","HCM phenotype","Descriptive phenotype","categorical",105,93,12,11.4285714285714
+"Longitudinal patient subset","bb_any","Beta-blocker use","Medication sensitivity covariate","binary",105,74,31,29.5238095238095
+"Longitudinal patient subset","ndhp_ccb_any","Non-DHP calcium-channel blocker use","Medication sensitivity covariate","binary",105,54,51,48.5714285714286
+"Longitudinal patient subset","htn_pre_test","Hypertension","Clinical sensitivity covariate","binary",105,82,23,21.9047619047619
+"Longitudinal patient subset","dm_pre_test","Diabetes","Clinical sensitivity covariate","binary",105,82,23,21.9047619047619
+"Longitudinal patient subset","ef_modsp4","LVEF","Descriptive echocardiographic variable","continuous",105,79,26,24.7619047619048
+"Longitudinal patient subset","e_prime_ave","Average e'","Descriptive diastolic variable","continuous",105,105,0,0
+"Longitudinal patient subset","hf_composite","Primary clinical composite status","Outcome","binary",105,105,0,0
+"Longitudinal patient subset","last_enc_date","Last encounter date","Follow-up","date",105,105,0,0
+"Clinical-outcomes cohort","age","Age","Primary covariate","continuous",259,259,0,0
+"Clinical-outcomes cohort","Sex","Sex","Primary covariate","categorical",259,259,0,0
+"Clinical-outcomes cohort","BMI","BMI","Primary covariate","continuous",259,259,0,0
+"Clinical-outcomes cohort","e_e_ave","Average E/e'","Cohort-defining exposure","continuous",259,259,0,0
+"Clinical-outcomes cohort","la_vol_index","LAVi","Cohort-defining exposure","continuous",259,259,0,0
+"Clinical-outcomes cohort","tr_max_vel","TRVmax","Available-case exposure","continuous",259,144,115,44.4015444015444
+"Clinical-outcomes cohort","VO2_FRIEND2_PP","Peak VO2 (FRIEND 2.0 % predicted)","Outcome","continuous",259,259,0,0
+"Clinical-outcomes cohort","VeVco2_slope","VE/VCO2 slope","Outcome","continuous",259,259,0,0
+"Clinical-outcomes cohort","HRR","Heart-rate recovery","Secondary outcome","continuous",259,238,21,8.10810810810811
+"Clinical-outcomes cohort","lv_max_wall_thickness","Maximum LV wall thickness","Structural sensitivity covariate","continuous",259,259,0,0
+"Clinical-outcomes cohort","lv_septal_thickness","LV septal thickness","Structural sensitivity covariate","continuous",259,259,0,0
+"Clinical-outcomes cohort","lvot_max_gradient","Resting maximum LVOT gradient","Structural sensitivity covariate","continuous",259,189,70,27.027027027027
+"Clinical-outcomes cohort","apical_hcm","Apical HCM morphology","Morphology sensitivity covariate","binary",259,223,36,13.8996138996139
+"Clinical-outcomes cohort","HCM_Phenotype","HCM phenotype","Descriptive phenotype","categorical",259,223,36,13.8996138996139
+"Clinical-outcomes cohort","bb_any","Beta-blocker use","Medication sensitivity covariate","binary",259,199,60,23.1660231660232
+"Clinical-outcomes cohort","ndhp_ccb_any","Non-DHP calcium-channel blocker use","Medication sensitivity covariate","binary",259,157,102,39.3822393822394
+"Clinical-outcomes cohort","htn_pre_test","Hypertension","Clinical sensitivity covariate","binary",259,210,49,18.9189189189189
+"Clinical-outcomes cohort","dm_pre_test","Diabetes","Clinical sensitivity covariate","binary",259,210,49,18.9189189189189
+"Clinical-outcomes cohort","ef_modsp4","LVEF","Descriptive echocardiographic variable","continuous",259,197,62,23.9382239382239
+"Clinical-outcomes cohort","e_prime_ave","Average e'","Descriptive diastolic variable","continuous",259,259,0,0
+"Clinical-outcomes cohort","hf_composite","Primary clinical composite status","Outcome","binary",259,259,0,0
+"Clinical-outcomes cohort","last_enc_date","Last encounter date","Follow-up","date",259,259,0,0

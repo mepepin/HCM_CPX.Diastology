@@ -1,0 +1,9 @@
+"Stage_ID","Parent_stage_ID","Branch","Stage","N_patients","Parent_N","Excluded_from_parent"
+"hcm_entry",NA,"Upstream analytic flow","Phenotypic HCM entry",440,NA,NA
+"demographics_complete","hcm_entry","Upstream analytic flow","Complete age, sex, and BMI",440,440,0
+"ee_measured","demographics_complete","Upstream analytic flow","+ E/e' measured",316,440,124
+"lavi_measured","ee_measured","Upstream analytic flow","+ LAVi measured",261,316,55
+"cross_sectional","lavi_measured","Upstream analytic flow","+ at least one CPET outcome: cross-sectional cohort",261,261,0
+"trv_measured","cross_sectional","Nested cross-sectional subset","TRVmax measured within cross-sectional cohort",145,261,116
+"outcomes","cross_sectional","Nested cross-sectional subset","Clinical-outcomes subcohort",259,261,2
+"longitudinal","cross_sectional","Nested cross-sectional subset","Longitudinal subcohort after intervention censoring",105,261,156

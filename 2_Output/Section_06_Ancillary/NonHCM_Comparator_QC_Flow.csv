@@ -1,0 +1,5 @@
+"control_no_exclusionary_diagnosis","control_structurally_normal_echo","control_qc_eligible","n"
+FALSE,FALSE,FALSE,361
+FALSE,TRUE,FALSE,140
+TRUE,FALSE,FALSE,271
+TRUE,TRUE,TRUE,243

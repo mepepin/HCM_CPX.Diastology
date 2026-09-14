@@ -1,0 +1,2 @@
+"analytic_cohort_mode","requirement","n_patients","reverse_by_setting"
+"ee_lavi","complete E/e' and LAVi; TRVmax available-case",261,"Set analytic_cohort_mode <- ""complete_three"""

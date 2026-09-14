@@ -1,0 +1,3 @@
+"Outcome","Decision","Rule","Primary models meeting rule","Primary models evaluated"
+"Peak VO2 (% predicted)","Random intercept","Within each outcome, use random slopes only if both primary E/e' and LAVi models converge without warnings, estimate a nonzero slope SD, improve AIC by at least 2, and have descriptive LRT P<0.05.",0,2
+"VE/VCO2 slope","Random intercept plus independent random slope","Within each outcome, use random slopes only if both primary E/e' and LAVi models converge without warnings, estimate a nonzero slope SD, improve AIC by at least 2, and have descriptive LRT P<0.05.",2,2
