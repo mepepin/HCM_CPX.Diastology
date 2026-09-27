@@ -1,0 +1,6 @@
+"sample","n_cross_sectional","n_peak_vo2","n_vevco2","n_longitudinal_patients","n_longitudinal_observations","n_outcomes_patients","n_outcomes_events"
+"Common cohort (E/e' + LAVi)",261,261,261,108,305,259,61
+"E/e' (average)",316,316,316,139,407,313,77
+"LAVi",301,301,301,124,352,299,77
+"TRVmax",253,253,251,112,350,250,77
+"Base (age/sex/BMI + >=1 CPET outcome)",441,441,438,199,615,436,118

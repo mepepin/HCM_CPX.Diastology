@@ -1,0 +1,10 @@
+"Parameter","Analysis sample","Sample definition","N","Events","HR","CI low","CI high","P value","Significant at 0.05"
+"E/e'","Parameter available-case sample","Exposure, follow-up and covariates measured",313,77,1.36180687979316,1.16847233566841,1.58713041057247,7.71842168865391e-05,TRUE
+"E/e'","Common E/e' + LAVi cohort","Additionally requires both cohort-defining parameters",259,61,1.31585591318336,1.09668509832515,1.57882767524052,0.00314910690479878,TRUE
+"E/e'","All-three-measured cohort","Additionally requires E/e', LAVi and TRVmax",148,39,1.23748460634664,0.995995423885565,1.53752528798851,0.0543875252157604,FALSE
+"LAVi","Parameter available-case sample","Exposure, follow-up and covariates measured",299,77,1.68437286997259,1.39824693108477,2.02904930597534,4.0418187067489e-08,TRUE
+"LAVi","Common E/e' + LAVi cohort","Additionally requires both cohort-defining parameters",259,61,1.61670409390919,1.2729045008434,2.05336073957703,8.21397634194089e-05,TRUE
+"LAVi","All-three-measured cohort","Additionally requires E/e', LAVi and TRVmax",148,39,1.60290790183737,1.19416892362434,2.15154966013915,0.00168106154326483,TRUE
+"TRVmax","Parameter available-case sample","Exposure, follow-up and covariates measured",250,77,1.22551917400271,1.02406916384507,1.46659747102346,0.0264495838685381,TRUE
+"TRVmax","Common E/e' + LAVi cohort","Additionally requires both cohort-defining parameters",148,39,1.27679084537299,1.00502338378612,1.6220466997365,0.0453926209089782,TRUE
+"TRVmax","All-three-measured cohort","Additionally requires E/e', LAVi and TRVmax",148,39,1.27679084537299,1.00502338378612,1.6220466997365,0.0453926209089782,TRUE

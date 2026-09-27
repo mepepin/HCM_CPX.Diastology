@@ -1,0 +1,8 @@
+"Model","Parameter","Scale","Sample","HR (95% CI)","P value","BH q value"
+"LAVi model","LAVi Z-score","Per 1 SD higher","299 / 77","1.68 (1.40-2.03)","4.04 × 10⁻⁸","2.83 × 10⁻⁷"
+"E/e' model","E/e'","Per 1 SD higher","313 / 77","1.36 (1.17-1.59)","7.72 × 10⁻⁵","1.8 × 10⁻⁴"
+"TRVmax model","TRVmax","Per 1 SD higher","250 / 77","1.23 (1.02-1.47)","2.64 × 10⁻²","3.09 × 10⁻²"
+"LVOT gradient model","Resting LVOT gradient","Per 1 SD higher","273 / 68","1.03 (0.83-1.28)","7.76 × 10⁻¹","7.76 × 10⁻¹"
+"LV septal thickness model","LV septal thickness","Per 1 SD higher","435 / 118","1.31 (1.09-1.59)","4.85 × 10⁻³","8.49 × 10⁻³"
+"Peak V̇O2 model","Peak V̇O2","Per 1 SD lower","436 / 118","1.74 (1.40-2.16)","4.19 × 10⁻⁷","1.47 × 10⁻⁶"
+"V̇E/V̇CO2 slope model","V̇E/V̇CO2 slope","Per 1 SD higher","433 / 117","1.26 (1.07-1.48)","6.39 × 10⁻³","8.95 × 10⁻³"

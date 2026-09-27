@@ -1,0 +1,5 @@
+"Outcome","Parameter","Patients in imputation frame","Exposure measured","Exposure imputed","Imputations","Overall P (imputed)","Nonlinear P (imputed)","N (available case)","Overall P (available case)","Nonlinear P (available case)","Overall conclusion unchanged","Nonlinear conclusion unchanged"
+"VE/VCO2 slope","E/e' (average)",438,316,122,20,0.0107616534971457,0.528054885819082,316,0.0454480381550853,0.478052022115072,TRUE,TRUE
+"VE/VCO2 slope","LAVi (mL/m²)",438,301,137,20,0.00175722740075973,0.071486048584696,301,0.00166449697807145,0.0353375993346291,TRUE,FALSE
+"Peak VO2 (% predicted)","E/e' (average)",441,316,125,20,9.22923410161505e-08,0.0233434241817492,316,6.53080098240476e-06,0.0314311250037466,TRUE,TRUE
+"Peak VO2 (% predicted)","LAVi (mL/m²)",441,301,140,20,0.00164545809714337,0.296807475890977,301,0.00566350874246164,0.177490042975156,TRUE,TRUE

@@ -1,9 +1,0 @@
-"Outcome","Parameter","Analysis sample","Random-effects structure","Patients","Observations","Time x parameter beta per year per 1 SD","CI low","CI high","P value"
-"Peak VO2 (% predicted)","E/e'","Primary E/e' + LAVi longitudinal cohort","Random intercept",105,294,1.97108876662212,-0.138654518237705,4.08083205148194,0.0668981619309557
-"Peak VO2 (% predicted)","E/e'","TRVmax-complete longitudinal subset","Random intercept",63,176,4.18917217081026,1.06241697563201,7.31592736598851,0.00910871630711532
-"Peak VO2 (% predicted)","LAVi","Primary E/e' + LAVi longitudinal cohort","Random intercept",105,294,-0.77903537055709,-2.94824325186886,1.39017251075468,0.479511836045604
-"Peak VO2 (% predicted)","LAVi","TRVmax-complete longitudinal subset","Random intercept",63,176,-3.05085080579331,-5.9383082082838,-0.163393403302827,0.0385675714872176
-"VE/VCO2 slope","E/e'","Primary E/e' + LAVi longitudinal cohort","Random intercept plus independent random slope",105,293,0.141762640870514,-0.168104990462017,0.451630272203044,0.367913608204618
-"VE/VCO2 slope","E/e'","TRVmax-complete longitudinal subset","Random intercept plus independent random slope",63,175,0.305359867734177,-0.139897696103525,0.750617431571879,0.17685642477479
-"VE/VCO2 slope","LAVi","Primary E/e' + LAVi longitudinal cohort","Random intercept plus independent random slope",105,293,0.242365983083182,-0.0625806872651173,0.547312653431481,0.118586018584839
-"VE/VCO2 slope","LAVi","TRVmax-complete longitudinal subset","Random intercept plus independent random slope",63,175,0.467961164587845,0.0572262285369965,0.878696100638694,0.0259338702330415

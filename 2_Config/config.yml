@@ -1,0 +1,83 @@
+# HCM diastology analysis: the single place where paths and analysis
+# parameters are set. Every stage script reads this file through
+# scripts/_common.R. Change a value here, then rerun `Rscript run_all.R`.
+
+paths:
+  # Raw inputs (patient-level; never committed). Read-only: the pipeline
+  # never writes to these files.
+  cpx_workbook: 1_Input/CPX_input.xlsx
+  echo_extract: 1_Input/mark_extract_20260316.xlsx
+  genetics_workbook: 1_Input/HCM_Genetics.xlsx
+
+  # Patient-level intermediates (git-ignored).
+  interim: 5_Data/1_Interim        # stage 01-02: imported and derived source tables
+  processed: 5_Data/2_Processed    # stage 03+: analysis cohorts
+  cache: 5_Data/3_Cache            # content-addressed bootstrap results
+
+  # Aggregate results (no identifiers).
+  results: 6_Results
+  logs: 7_Logs
+
+  # Package library used before renv is initialized. Leave empty ("") once
+  # renv.lock is in place.
+  r_library: .Rlib
+
+cohort:
+  # "ee_lavi": require measured E/e' and LAVi; TRVmax analyzed where measured.
+  # "complete_three": additionally require measured TRVmax.
+  analytic_cohort_mode: ee_lavi
+  # Minimum peak respiratory exchange ratio for a maximal-effort CPET.
+  rer_min: 1.0
+  # Maximum |CPET date - echo date| for pairing, in days.
+  echo_window_days: 7
+  # Age floor for the adults-only sensitivity analysis. The FRIEND and
+  # Wasserman reference equations were developed in adults, so every primary
+  # model is refitted with patients below this age at baseline excluded
+  # (owner decision, card 1.3). Set to NULL to skip the sensitivity.
+  min_age_sensitivity: 18
+
+# Multiple imputation is a labelled SENSITIVITY analysis only; every primary
+# estimate stays available-case (owner decision, card 1.2). Set enabled to
+# false to skip it.
+imputation:
+  enabled: true
+  m: 20
+  seed: 20260916
+
+# Age-specific ASE lower reference limits for average e-prime (cm/s), as
+# stated in the manuscript Methods. Patients below min_age are not classified
+# by these cutoffs rather than being assigned the youngest band.
+eprime_reference:
+  min_age: 20
+  bands:
+    - max_age: 39.999
+      limit: 9.0
+    - max_age: 65.0
+      limit: 7.0
+    - max_age: 200
+      limit: 6.5
+
+rcs:
+  bootstrap_reps: 2000
+  bootstrap_seed: 20260514
+
+figures:
+  # Seed for jittered point layers so figures are identical on every run.
+  jitter_seed: 20260915
+
+input_integrity:
+  # Known cross-row formula damage. The `CPX` sheet of CPX_input.xlsx was
+  # sorted after its formulas were written (identified 2026-09-15), so the
+  # cached values in these columns belong to other rows. The pipeline
+  # recomputes the ones the analysis uses from same-row raw inputs
+  # (3_Functions/derive.R) and never reads the others. Verified 2026-09-16:
+  # the cross-row mapping is a one-to-one row remap, and no other sheet or
+  # workbook is affected.
+  #
+  # The run FAILS if a cross-row formula appears in any other sheet or in a
+  # column not listed here. Do not extend this list to silence a new failure
+  # without establishing what changed.
+  accepted_cross_row:
+    - workbook: CPX_input.xlsx
+      sheet: CPX
+      columns: AA AB AC AD AE AF AG AH AI AJ AK AN AO AP BY BZ E G I T U V W X

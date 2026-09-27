@@ -1,7 +1,0 @@
-"Outcome","Parameter","Analysis sample","Patients","Observations","Random-effects structure","Interaction beta per year per 1 SD","95% CI","P value","Primary inference"
-"Peak VO2 (% predicted)","E/e'","Primary E/e' + LAVi cohort",105,294,"Random intercept",1.97096459014841,"-0.14 to 4.08","0.067","No evidence of trajectory modification"
-"Peak VO2 (% predicted)","LAVi","Primary E/e' + LAVi cohort",105,294,"Random intercept",-0.779799440203633,"-2.95 to 1.39","0.479","No evidence of trajectory modification"
-"Peak VO2 (% predicted)","TRVmax","TRVmax available-case",63,176,"Random intercept",-1.58968117783794,"-4.78 to 1.60","0.326","No evidence of trajectory modification"
-"VE/VCO2 slope","E/e'","Primary E/e' + LAVi cohort",105,293,"Random intercept plus independent random slope",0.143610984631403,"-0.16 to 0.45","0.359","No evidence of trajectory modification"
-"VE/VCO2 slope","LAVi","Primary E/e' + LAVi cohort",105,293,"Random intercept plus independent random slope",0.243971695745739,"-0.06 to 0.55","0.114","No evidence of trajectory modification"
-"VE/VCO2 slope","TRVmax","TRVmax available-case",63,175,"Random intercept plus independent random slope",0.148126692239719,"-0.30 to 0.59","0.512","No evidence of trajectory modification"

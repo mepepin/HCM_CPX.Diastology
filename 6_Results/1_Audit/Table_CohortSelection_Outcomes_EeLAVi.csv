@@ -1,0 +1,5 @@
+"Parameter","Analysis sample","Effect scale","Model","N","Events","Model coefficients","Events per coefficient","HR","CI low","CI high","P value","Global PH P value","Apical morphology HR","Apical morphology P value"
+"E/e'","Primary E/e' + LAVi outcomes cohort","Per 1 SD in the primary outcomes cohort","Age/sex/BMI adjusted",259,61,4,15.25,1.31585591318336,1.09668509832515,1.57882767524052,0.00314910690479878,0.062594781724866,NA,NA
+"E/e'","TRVmax-complete outcomes subset","Per 1 SD in the primary outcomes cohort","Age/sex/BMI adjusted",148,39,4,9.75,1.23748460634664,0.995995423885565,1.53752528798851,0.0543875252157604,0.427253376849047,NA,NA
+"LAVi","Primary E/e' + LAVi outcomes cohort","Per 1 SD in the primary outcomes cohort","Age/sex/BMI adjusted",259,61,4,15.25,1.61670409390919,1.2729045008434,2.05336073957703,8.21397634194089e-05,0.0569911483770133,NA,NA
+"LAVi","TRVmax-complete outcomes subset","Per 1 SD in the primary outcomes cohort","Age/sex/BMI adjusted",148,39,4,9.75,1.60290790183737,1.19416892362434,2.15154966013915,0.00168106154326483,0.281636719107228,NA,NA

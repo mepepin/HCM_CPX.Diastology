@@ -1,0 +1,7 @@
+"outcome","index","population","n","expected_n","denominator_matches"
+"VO2_FRIEND2_PP","e_e_ave","E/e' (average) available-case sample",316,316,TRUE
+"VeVco2_slope","la_vol_index","LAVi (mL/m²) available-case sample",301,301,TRUE
+"VeVco2_slope","tr_max_vel","TRVmax (cm/s) available-case sample",251,251,TRUE
+"VO2_FRIEND2_PP","la_vol_index","LAVi (mL/m²) available-case sample",301,301,TRUE
+"VO2_FRIEND2_PP","tr_max_vel","TRVmax (cm/s) available-case sample",253,253,TRUE
+"VeVco2_slope","e_e_ave","E/e' (average) available-case sample",316,316,TRUE

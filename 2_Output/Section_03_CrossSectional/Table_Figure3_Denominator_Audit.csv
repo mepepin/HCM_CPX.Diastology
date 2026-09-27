@@ -1,7 +1,0 @@
-"outcome","index","population","n","expected_n","denominator_matches"
-"VeVco2_slope","tr_max_vel","TRVmax available-case subset",145,145,TRUE
-"VeVco2_slope","la_vol_index","Primary E/e' + LAVi cohort",261,261,TRUE
-"VO2_FRIEND2_PP","tr_max_vel","TRVmax available-case subset",145,145,TRUE
-"VO2_FRIEND2_PP","e_e_ave","Primary E/e' + LAVi cohort",261,261,TRUE
-"VO2_FRIEND2_PP","la_vol_index","Primary E/e' + LAVi cohort",261,261,TRUE
-"VeVco2_slope","e_e_ave","Primary E/e' + LAVi cohort",261,261,TRUE

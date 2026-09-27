@@ -1,2 +1,0 @@
-"Candidate_ID","Method","Caliper","Order","Matched_pairs","SMD_age","SMD_sex","SMD_BMI","Maximum_absolute_SMD","Balance_pass"
-"M55","Mahalanobis within propensity-score caliper",0.25,"largest",177,0.0464276306573943,0,0.097412403857185,0.097412403857185,TRUE

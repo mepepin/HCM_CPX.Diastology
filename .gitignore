@@ -1,33 +1,24 @@
-# PHI / patient-level data — never commit
+# ── Patient-level data: never commit ──────────────────────────────────────────
+# Source workbooks (PHI) and every patient-level intermediate the pipeline
+# writes. Only aggregate results under 6_Results/ belong in this repository.
 1_Input/
-2_Output/Data_CrossSectional_Analysis.csv
-2_Output/Section_03_CrossSectional/Data_CrossSectional_Analysis.csv
-2_Output/CFA_Factor_Scores.csv
-2_Output/Manuscript_Main/Figure1_parts/
-2_Output/Section_*/*.pdf
-2_Output/Section_*/*.png
-2_Output/Cycle/Cycle_Linked_Tests.xlsx
-2_Output/Serial_CPX_missing_resting_echo.xlsx
-outputs/audit/Serial_CPX_missing_resting_echo.xlsx
-Manuscript/
-Presentation/
+5_Data/
+
+# Run logs
+7_Logs/
+
+# Local package library used before renv is restored
+.Rlib/
+
+# ── Local build artifacts ─────────────────────────────────────────────────────
+Rplots.pdf
+tmp/
+output/
 outputs/
-README_HCM.Diastology.qmd
-README_HCM.Diastology_files/
-_Scripts/*.html
-_Scripts/*.pdf
-_Scripts/.Rlib/
+__pycache__/
+*.pyc
 
-# macOS
-.DS_Store
-
-# Quarto render cache
-.quarto/
-*_cache/
-*_files/
-/cache/
-
-# R session
+# ── R session ─────────────────────────────────────────────────────────────────
 .Rproj.user/
 .Rhistory
 .Rapp.history
@@ -35,32 +26,15 @@ _Scripts/.Rlib/
 .RDataTmp
 .Ruserdata
 .Renviron
-
-# R build artifacts
 *-Ex.R
-/*.tar.gz
 /*.Rcheck/
-*.utf8.md
-*.knit.md
+/*.tar.gz
 
-# Vignettes
-vignettes/*.html
-vignettes/*.pdf
+# ── Manuscript drafts (kept outside this repository) ──────────────────────────
+/*.docx
+Manuscript/
 
-# OAuth
-.httr-oauth
-
-# pkgdown / RStudio Connect
-docs/
-rsconnect/
-po/*~
-
-# Large binary files
-*.numbers
-diona_echo_extract*
-
-# Office temp/lock files
-~$*
-
-# Claude project files
+# ── Editor and OS ─────────────────────────────────────────────────────────────
+.DS_Store
 .claude/
+~$*

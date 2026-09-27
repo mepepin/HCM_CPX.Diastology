@@ -1,0 +1,7 @@
+"Outcome","Parameter","Patients","Observations","expected_patients","expected_observations","denominator_matches"
+"Peak VO2 (% predicted)","E/e'",139,406,139,406,TRUE
+"Peak VO2 (% predicted)","LAVi",124,352,124,352,TRUE
+"Peak VO2 (% predicted)","TRVmax",112,344,112,344,TRUE
+"VE/VCO2 slope","E/e'",139,404,139,404,TRUE
+"VE/VCO2 slope","LAVi",124,351,124,351,TRUE
+"VE/VCO2 slope","TRVmax",111,341,111,341,TRUE

@@ -1,7 +1,0 @@
-"Outcome","Parameter","Population","N","Overall p","Nonlinearity q","Interpretation"
-"Peak V̇O2","E/e' (average)","E/e' + LAVi cohort",261,"0.256","0.517","No clear association"
-"Peak V̇O2","LAVi (mL/m²)","E/e' + LAVi cohort",261,"0.530","0.549","No clear association"
-"Peak V̇O2","TRVmax (cm/s)","TRVmax available-case subset",145,"0.335","0.402","No clear association"
-"V̇E/V̇CO2 slope","E/e' (average)","E/e' + LAVi cohort",261,"0.004","0.898","Association; no evidence of nonlinearity"
-"V̇E/V̇CO2 slope","LAVi (mL/m²)","E/e' + LAVi cohort",261,"0.016","0.351","Association; no evidence of nonlinearity"
-"V̇E/V̇CO2 slope","TRVmax (cm/s)","TRVmax available-case subset",145,"<0.001","0.263","Association; no evidence of nonlinearity"

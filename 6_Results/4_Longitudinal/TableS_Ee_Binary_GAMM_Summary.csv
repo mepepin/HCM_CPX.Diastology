@@ -1,0 +1,7 @@
+"Outcome","Model component","edf","F statistic","P value"
+"Peak V̇O2","Time smooth","1.04","5.86","0.016"
+"Peak V̇O2","Threshold group","—","4.10","0.044"
+"Peak V̇O2","Time x threshold group","2.45","3.37","0.018"
+"V̇E/V̇CO2 slope","Time smooth","1.04","5.61","0.018"
+"V̇E/V̇CO2 slope","Threshold group","—","0.00","1.000"
+"V̇E/V̇CO2 slope","Time x threshold group","1.03","0.77","0.380"

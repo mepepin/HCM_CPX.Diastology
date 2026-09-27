@@ -1,0 +1,7 @@
+"Outcome","Parameter","Patients available-case","Patients common cohort","Observations available-case","Observations common cohort","Interaction beta available-case","Interaction beta common cohort","P value available-case","P value common cohort","Random-effects structure","Conclusion unchanged"
+"Peak VO2 (% predicted)","E/e'",139,108,406,305,-0.0178850434065167,-0.23913872117279,0.957732812079203,0.561913147854121,"intercept_slope",TRUE
+"Peak VO2 (% predicted)","LAVi",124,108,352,305,0.126276302909769,-0.349917277858373,0.749501667578999,0.414146472749324,"intercept_slope",TRUE
+"Peak VO2 (% predicted)","TRVmax",112,64,344,180,0.0112965381754068,-0.197449401780697,0.976686985444282,0.727086672180115,"intercept_slope",TRUE
+"VE/VCO2 slope","E/e'",139,108,404,304,0.0341448092344266,0.170229570137878,0.77732775672621,0.25500064079017,"intercept_slope",TRUE
+"VE/VCO2 slope","LAVi",124,108,351,304,0.403849428950346,0.236812374757472,0.00471086692972907,0.114360640476779,"intercept_slope",FALSE
+"VE/VCO2 slope","TRVmax",111,64,341,179,-0.0408259129430258,0.0941202769577789,0.773436229368311,0.670276182259312,"intercept_slope",TRUE

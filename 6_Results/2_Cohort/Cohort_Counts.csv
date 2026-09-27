@@ -1,0 +1,25 @@
+"quantity","value"
+"Screened HCM cohort (patients)",443
+"Base analytic cohort (patients)",441
+"Base analytic cohort with follow-up (patients)",436
+"Base analytic cohort composite events",118
+"Common E/e' + LAVi cohort (patients)",261
+"Common-cohort outcomes subset (patients)",259
+"Common-cohort outcomes subset composite events",61
+"Analytic cohort with measured resting LVOT gradient",191
+"Obstructive HCM (resting LVOT >= 30 mm Hg)",38
+"Non-obstructive HCM (resting LVOT < 30 mm Hg)",153
+"Resting LVOT gradient unavailable",70
+"Longitudinal patients",199
+"Longitudinal observations",615
+"Longitudinal observations before myectomy censoring",682
+"Longitudinal patients before myectomy censoring",215
+"Longitudinal follow-up, median years",3.12388774811773
+"Longitudinal follow-up, Q1 years",1.59616700889802
+"Longitudinal follow-up, Q3 years",5.37987679671458
+"CPETs per patient, median",3
+"CPETs per patient, Q1",2
+"CPETs per patient, Q3",4
+"Inter-test interval, median days",529
+"Inter-test interval, Q1 days",395
+"Inter-test interval, Q3 days",829

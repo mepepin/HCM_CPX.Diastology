@@ -1,0 +1,4 @@
+"variable","SMD (unweighted)","SMD (overlap-weighted)","n_hcm","n_reference","effective_n_hcm","effective_n_reference"
+"age",0.983019451893511,2.20599496956107e-08,441,337,318.7,277.4
+"sex_num",-0.225897108057025,-4.24227983364061e-09,441,337,318.7,277.4
+"BMI",0.545269849786021,9.79332738042752e-09,441,337,318.7,277.4

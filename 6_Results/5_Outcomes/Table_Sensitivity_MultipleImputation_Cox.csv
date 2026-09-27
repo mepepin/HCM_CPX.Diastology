@@ -1,0 +1,3 @@
+"Parameter","Patients in imputation frame","Events","Exposure measured","Exposure imputed","Imputations","HR","CI low","CI high","P value","Rubin df","Fraction missing information","Available-case N","Available-case HR","Available-case P value","Conclusion unchanged"
+"E/e'",436,118,313,123,20,1.36999889903787,1.18116940361928,1.58901591728831,4.23116867516215e-05,204.236008393167,0.31171484305684,313,1.36180687979316,7.71842168865391e-05,TRUE
+"LAVi",436,118,299,137,20,1.63623841256998,1.37553500157193,1.94635261168201,5.72521179741254e-08,266.763500003496,0.272313796068561,299,1.68437286997259,4.0418187067489e-08,TRUE
